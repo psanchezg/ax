@@ -162,7 +162,12 @@ manifest without `harness` and observe identical Antigravity behavior to today.
    suspend/resume while `/workspace` remains the agent's only file surface.
 5. **Given** the DSH harness, **When** it starts, **Then** it sets
    `DSH_PERMISSION_MODE=danger-full-access` so Agent Substrate remains the single
-   isolation boundary, and a test asserts the agent cannot write outside `/workspace`.
+   isolation boundary, and a test asserts the harness writes its state outside the
+   workspace while `/workspace` stays the agent's only *durable* file surface.
+   *(Corrected after cluster validation: Substrate confines the actor to its sandbox but
+   does not make the sandbox rootfs read-only, so the agent can write elsewhere inside
+   its own sandbox; the enforced boundary is "cannot escape the sandbox", and the
+   read-only rootfs is a separate AX improvement, not a property of this feature.)*
 6. **Given** `harness.image` set on the workspace, **When** the task is provisioned,
    **Then** the task runner image is overridden (e.g. the Node-based DSH image), leaving
    Antigravity users on the existing image unaffected.
@@ -350,8 +355,13 @@ every RPC, env var, and recipe in the docs can be exercised as written.
 - **SC-006**: Interoperability across versions: old CLI + new server and new CLI + old
   server both operate without wire errors (additive-only proto; verified by
   round-trip tests with unknown fields).
-- **SC-007**: Single isolation invariant holds: the sandboxed agent cannot write outside
-  `/workspace`, asserted by an automated test.
+- **SC-007**: Single isolation invariant holds: the actor cannot escape its Agent
+  Substrate sandbox (no access to the host, other actors, or the cluster), and
+  `/workspace` is the only file surface that survives suspend/resume. Asserted by test
+  for the harness's own writes and observed in a cluster for the agent.
+  *(Reworded after cluster validation; the earlier wording — "cannot write outside
+  `/workspace`" — was measured to be false, because Substrate does not make the sandbox
+  rootfs read-only.)*
 - **SC-008**: First boot of a DSH task needs no npm registry access (profile
   pre-baked), keeping workspace setup latency within the current Antigravity bootstrap
   order of magnitude.

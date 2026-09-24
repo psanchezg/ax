@@ -7,6 +7,26 @@ al sitio correcto. Marca los checkboxes conforme avances.
 **Documento fork-local.** No forma parte de la serie upstream-bound (junto con
 `sonar-project.properties`, `.specify/` y `.claude/`).
 
+## Estado de la validación (ejecutada en Apple Silicon)
+
+| Nivel | Estado |
+|---|---|
+| 0 — suite y runner real en local | ✅ verificado |
+| 0.5 — `dsh` real contra el `settings.yaml` generado | ✅ verificado (así apareció el fallo de `agent-default-model`) |
+| 1 — plano de control sin clúster | ✅ verificado |
+| 2 — sandbox real (Kubernetes + Substrate) | **parcial**: AX reconcilia la tarea, inyecta la credencial del `Model`, escribe `settings.yaml` y sirve `/metadata/v1alpha1/ax/model` dentro del sandbox. **Pendiente:** que DSH arranque dentro de la imagen — limitación de empaquetado del propio CLI, con el detalle y la salida en §3.2 |
+
+Tres cosas que aprendimos ejecutándolo y que corrigen supuestos previos:
+
+1. **`harness.image` debe ir pinneado por digest.** Substrate rechaza un `ActorTemplate`
+   cuya imagen vaya solo con tag (`must be pinned by digest`), y como AX cae entonces al
+   template por defecto, el error que ves es un engañoso `actor template not found` (§3.3).
+2. **Hace falta crear un `WorkerPool`**: AX no crea capacidad (§3.1).
+3. **El agente *sí* puede escribir fuera de `/workspace`** dentro del sandbox. Substrate
+   aísla el sandbox (kernel gVisor: el actor no escapa, no ve el host ni otros actores),
+   pero no restringe el rootfs del actor. El criterio SC-007 debe leerse como «no puede
+   escapar del sandbox», no como «solo escribe en `/workspace`» (§3.4, comprobación 4).
+
 ## 0. Preparación
 
 ```bash
@@ -452,10 +472,48 @@ KO_DOCKER_REPO=$AX_IMAGE_REPO ko apply --platform=$PLATFORM -f deploy/ax-control
 kubectl get pods -n ax-system
 ```
 
+#### Capacidad: hay que crear un `WorkerPool` (AX no lo hace)
+
+AX pide a Substrate atespaces, plantillas y actores, pero **no crea capacidad**. Sin un
+`WorkerPool` el actor se queda sin sitio y la tarea no arranca. AX fija la clase
+`SANDBOX_CLASS_GVISOR`, así que el pool debe ser gVisor (el `SandboxConfig` que instala
+Substrate ya se llama `gvisor-default`), y la imagen del worker se construye con ko:
+
+```bash
+cat > /tmp/ax-pool.yaml <<'EOF'
+apiVersion: ate.dev/v1alpha1
+kind: WorkerPool
+metadata:
+  name: ax-pool
+  namespace: ax-system
+  labels:
+    workload: ax
+spec:
+  replicas: 2
+  workerImage: ko://github.com/agent-substrate/substrate/cmd/ateom-gvisor
+  template:
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+EOF
+
+cd /tmp/ax-substrate
+KO_DOCKER_REPO=localhost:5001 ko apply --platform=$PLATFORM -f /tmp/ax-pool.yaml
+cd -
+kubectl get workerpools -n ax-system          # DESIRED 2 / READY 2
+kubectl get pods -n ax-system -l ate.dev/worker-pool=ax-pool
+```
+
+El `namespace` del pool no restringe la selección (el emparejamiento es por etiquetas);
+`spec.template.resources.limits` es la **capacidad por actor**, así que dimensiónalo por
+encima de lo que pidas en la tarea.
+
 - [X] `kubectl config current-context` = `kind-ax-test`
 - [X] Substrate instalado y su Control API visible en `ate-system`
 - [X] Pods de `ax-system` en `Running`
 - [X] La plataforma de las imágenes coincide con la de los nodos
+- [ ] `WorkerPool` con 2 réplicas `READY`
 
 ### 3.2 Imagen del runner con DSH
 
@@ -537,16 +595,21 @@ endurecido, añade `api.deepseek.com:443` a su allowlist (por defecto `*:443`).
 | 1 | `./bin/ax ssh dsh-goal -- ls -l /ax/dsh` | `settings.yaml` con el binding del `Model`; DSH arrancó contra tu endpoint |
 | 2 | `./bin/ax ssh dsh-goal -- env \| grep -E 'DEEPSEEK_API_KEY\|AX_MODEL_BASE_URL'` | la credencial bajo el nombre declarado y el endpoint |
 | 3 | `./bin/ax ssh dsh-goal -- curl -s http://127.0.0.1:80/metadata/v1alpha1/ax/model` | el `Model`, sin valor de secreto |
-| 4 | `./bin/ax ssh dsh-goal -- sh -c 'echo x > /etc/x'` | **falla** (Substrate); `sh -c 'echo ok > /workspace/ok'` **funciona** |
+| 4 | `./bin/ax ssh dsh-goal -- sh -c 'echo x > /etc/x; echo exit=$?'` | **`exit=0`, y el fichero existe**: el sandbox **no** hace el rootfs de solo lectura. Lo que Substrate garantiza es que el actor no escapa del sandbox (no ve el host ni otros actores); `/workspace` es la superficie **durable** que sobrevive a suspender/reanudar |
 | 5 | Aplica un workspace **sin** `harness` y ejecuta su tarea | comportamiento Antigravity idéntico al de antes |
 | 6 | Rota la clave (`kubectl create secret ... --dry-run=client -o yaml \| kubectl apply -f -`) y reprovisiona | el nuevo valor aparece en el contenedor, sin tocar código ni manifiestos |
 
 - [ ] 1 · `settings.yaml` dentro del sandbox
 - [ ] 2 · credencial y endpoint en el entorno
 - [ ] 3 · ruta `/model` accesible desde dentro
-- [ ] 4 · aislamiento (fuera de `/workspace` falla, dentro funciona)
+- [ ] 4 · el actor no escapa del sandbox (comprueba que no alcanza el host ni otros actores; **no** que `/etc` sea de solo lectura)
 - [ ] 5 · path Antigravity intacto
 - [ ] 6 · rotación de clave sin cambios
+
+> **Mejora anotada (no incluida).** Restringir el rootfs del actor (por ejemplo
+> `readOnlyRootFilesystem` en el `ActorTemplate` que construye AX) haría cierta la promesa
+> fuerte de «el agente solo escribe en `/workspace`». Es un cambio de diseño de AX, no de
+> esta feature, y merece su propio PR upstream.
 
 ---
 

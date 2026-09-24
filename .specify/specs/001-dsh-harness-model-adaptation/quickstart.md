@@ -122,12 +122,18 @@ DSH happy path: `examples/workspace-dsh.yaml` (`harness.kind: deepseek-harness`,
 Default preservation (SC-005/SC-009): the same manifest **without** `harness` runs
 today's Antigravity bootstrap byte-for-byte — existing bootstrap tests pass unmodified.
 
-Isolation invariant (SC-007):
+Isolation invariant (SC-007). Measured in a cluster: the sandbox rootfs is **not**
+read-only, so writing to `/etc` succeeds — what Substrate enforces is that the actor
+cannot escape its sandbox (no host, no other actors, no cluster access):
 
 ```bash
-bin/ax ssh <dsh-task> -- sh -c 'echo pwned > /etc/pwned'   # must fail at the Substrate boundary
-bin/ax ssh <dsh-task> -- sh -c 'echo ok  > /workspace/ok'  # must succeed
+bin/ax ssh <dsh-task> -- sh -c 'echo ok > /workspace/ok; echo exit=$?'   # exit=0, y es lo que sobrevive a suspend/resume
+bin/ax ssh <dsh-task> -- sh -c 'echo x > /etc/pwned; echo exit=$?'       # exit=0: dentro del sandbox, pero se pierde y no da acceso al host
 ```
+
+Lo que hay que comprobar es el aislamiento del sandbox (el actor no alcanza el host ni
+otros actores) y que `/workspace` es la única superficie durable. Restringir el rootfs
+del actor sería una mejora aparte de AX.
 
 First boot without npm egress (SC-008): run the task on a cluster with npm registry
 blocked via `Gateway` allowlist — setup completes from the pre-baked profile.
