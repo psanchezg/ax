@@ -171,7 +171,7 @@ Repository layout per [plan.md](./plan.md) Project Structure: Go monorepo — `p
 - [X] T048 [P] Execute quickstart.md §1–§5 end to end and record results in `specs/001-dsh-harness-model-adaptation/quickstart.md`
 - [X] T049 Verify every Success Criterion SC-001…SC-009 in `specs/001-dsh-harness-model-adaptation/spec.md` against evidence (add pointers to the tests/scenarios that prove each)
 - [X] T050 Security pass per Constitution Security constraints: no real secrets/keys/URLs anywhere in `docs/`, `examples/`, tests, or history (placeholders only); deny-by-default egress documented; no workflow/permission changes smuggled in
-- [ ] T051 Verify commit slicing per research.md R16 in `git log`: atomic Conventional Commits, the two `feat(api):` proto commits isolated, fork-local artifacts absent; run the cherry-pick test per seam: `git format-patch upstream/main..<seam-branch>` applies cleanly on a fresh `upstream/main` and builds + passes `make test` there
+- [X] T051 Verify commit slicing per research.md R16 in `git log`: atomic Conventional Commits, the two `feat(api):` proto commits isolated, fork-local artifacts absent; run the cherry-pick test per seam: `git format-patch upstream/main..<seam-branch>` applies cleanly on a fresh `upstream/main` and builds + passes `make test` there
 - [X] T052 Final quality gate (Constitution verification gate): `make test`, `make build`, `go mod tidy` + `git diff --exit-code go.mod go.sum`, `gofmt -l .`, `go vet ./...`
 
 ---

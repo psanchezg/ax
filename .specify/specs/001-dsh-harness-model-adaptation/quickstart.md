@@ -166,7 +166,9 @@ between "the code is verified" and "a cluster was exercised".
 | No fabricated completions | `internal/model` tests (fallback regression, per-adapter 4xx/5xx) | PASS: every failure is a `*ProviderError` |
 | Local runner end to end | `ax-task-runner --task-file … --workspace-file … --model-file …` (or `AX_MODEL_YAML`), DSH harness, port 18099 | PASS: `/readyz` = `ok`; `/metadata/v1alpha1/ax/model` serves the `Model` with the secret **reference**; `$DSH_HOME/settings.yaml` contains the `llm-pi-ai` provider binding; the task command ran |
 | Antigravity path unchanged | existing `internal/workspace` and `runner` tests, unmodified | PASS (SC-009) |
-| Export rehearsal | `git format-patch` of the upstream-bound commits, then `git am` on a fresh `upstream/main` worktree | **FINDING**: 8 of 14 patches applied cleanly; the controller patch conflicts in `docs/runner.md` because upstream advanced by one commit (`e6211f8`) after the fork point — the fork must be rebased onto `upstream/main` before export |
+| Export rehearsal | `git format-patch` of the 14 upstream-bound commits, then `git am` on a fresh `upstream/main` worktree | PASS: all 14 patches apply cleanly, and that tree passes `make test` (8 packages), `make build`, `gofmt -l .`, and `go vet ./...` |
+
+**Finding and resolution.** The first rehearsal applied only 8 of 14 patches: upstream had advanced by one commit after the fork point (`e6211f8`, "keep task templates stable across lifecycle changes"), which edits `docs/runner.md` and the same `internal/controller/reconciler.go` region this work touches. Per the constitution the fork was rebased onto `upstream/main`, which resolved both files through a three-way merge (upstream's `AX_TASK_YAML` wording and launch-config change kept, our model rows and credential block added) and surfaced one artifact: a duplicate `mockControlServer.CreateActorTemplate` in the controller test, removed inside the commit that introduced it rather than in a fixup. The exported series carries one cosmetic `git am` warning — the pre-existing adaptation proposal ends with a blank line — which does not affect the apply.
 
 ### Success criteria evidence
 
