@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/google/ax/internal/model"
+	"github.com/google/ax/internal/store"
 	"github.com/google/ax/internal/substrate"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 	"google.golang.org/grpc/codes"
@@ -41,6 +42,9 @@ import (
 const (
 	geminiSecretName = "gemini-api-secret"
 	geminiSecretKey  = "GEMINI_API_KEY"
+	// modelBaseURLEnv carries the bound Model's endpoint into the task
+	// container, empty when the Model declares none.
+	modelBaseURLEnv = "AX_MODEL_BASE_URL"
 	// secretLookupTimeout bounds the Kubernetes secret lookup so a slow or
 	// unreachable cluster cannot stall reconciliation.
 	secretLookupTimeout = 2 * time.Second
@@ -56,6 +60,9 @@ const (
 // SecretResolver looks up a key from a Kubernetes secret in the given namespace.
 type SecretResolver func(ctx context.Context, namespace, secretName, key string) (string, error)
 
+// ModelResolver looks up a Model resource by name in the given atespace.
+type ModelResolver func(ctx context.Context, atespace, name string) (*v1alpha1.Model, error)
+
 // TaskReconciler reconciles Task resources by provisioning and orchestrating
 // sandboxed Actors on Agent Substrate.
 type TaskReconciler struct {
@@ -67,6 +74,11 @@ type TaskReconciler struct {
 	// SecretResolver resolves the Gemini API key for task containers. It defaults
 	// to the Kubernetes secret lookup; tests replace it to avoid touching a cluster.
 	SecretResolver SecretResolver
+
+	// ModelResolver resolves the Model a bound workspace's harness references.
+	// A nil resolver means Model credentials cannot be resolved; deployments
+	// that never reference a Model keep the legacy Gemini credential path.
+	ModelResolver ModelResolver
 
 	// WorkspaceReadyTimeout bounds how long Reconcile waits for the actor's workspace
 	// to report ready before recording it as still initializing.
@@ -150,7 +162,32 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, task *v1alpha1.Task, gat
 		}
 	}
 
-	if geminiKey := r.lookupGeminiKey(ctx, atespace); geminiKey != "" {
+	// A workspace harness may name a Model. Then the credential it declares, the
+	// provider endpoint, and the resource itself are injected, and the legacy
+	// Gemini literal is not. With no model reference, behavior is unchanged.
+	boundModel, bindErr := r.resolveModelBinding(ctx, atespace, workspaces)
+	if bindErr != nil {
+		r.setCondition(task, "Ready", "False", "UnresolvedModelRef", bindErr.Error(), now)
+		task.Status.Phase = "Failed"
+		return task, bindErr
+	}
+	if boundModel != nil {
+		cred, credErr := r.resolveModelCredential(ctx, atespace, boundModel)
+		if credErr != nil {
+			r.setCondition(task, "Ready", "False", "UnresolvedModelCredential", credErr.Error(), now)
+			task.Status.Phase = "Failed"
+			return task, credErr
+		}
+		if cred.keyName != "" {
+			extraEnv[cred.keyName] = cred.value
+			slog.Info("resolved model credential for actor template",
+				"model", boundModel.GetMetadata().GetName(), "env", cred.keyName)
+		}
+		extraEnv[modelBaseURLEnv] = cred.baseURL
+		if modelYAML, err := yaml.Marshal(boundModel); err == nil {
+			extraEnv["AX_MODEL_YAML"] = string(modelYAML)
+		}
+	} else if geminiKey := r.lookupGeminiKey(ctx, atespace); geminiKey != "" {
 		extraEnv[geminiSecretKey] = geminiKey
 	}
 
@@ -368,6 +405,83 @@ func (r *TaskReconciler) setCondition(task *v1alpha1.Task, condType, status, rea
 		Message:            message,
 		LastTransitionTime: ts,
 	})
+}
+
+// resolveModelBinding returns the Model named by the first bound workspace's
+// harness spec, or nil when no workspace references one. A reference that
+// cannot be resolved is an error: the task must not silently fall back to the
+// legacy credential when its manifest explicitly asked for a Model.
+func (r *TaskReconciler) resolveModelBinding(ctx context.Context, atespace string, workspaces []*v1alpha1.Workspace) (*v1alpha1.Model, error) {
+	ref := ""
+	for _, ws := range workspaces {
+		if name := ws.GetSpec().GetHarness().GetModelRef(); name != "" {
+			ref = name
+			break
+		}
+	}
+	if ref == "" {
+		return nil, nil
+	}
+	if r.ModelResolver == nil {
+		return nil, fmt.Errorf("workspace references model %q but no model resolver is configured", ref)
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, secretLookupTimeout)
+	defer cancel()
+	m, err := r.ModelResolver(lookupCtx, atespace, ref)
+	if err != nil {
+		return nil, fmt.Errorf("resolving model %q: %w", ref, err)
+	}
+	if m == nil {
+		return nil, fmt.Errorf("resolving model %q: not found", ref)
+	}
+	return m, nil
+}
+
+// modelCredential is the credential and endpoint a bound Model contributes to a
+// task container. keyName is empty for a credential-less endpoint (for example
+// a local server that does not check credentials).
+type modelCredential struct {
+	keyName string
+	value   string
+	baseURL string
+}
+
+// resolveModelCredential resolves the Model's secretKey reference against the
+// Kubernetes secret in the task's atespace. The secret value is injected under
+// the name the Model declares, so a provider profile that resolves its key from
+// the environment needs no AX-specific wiring.
+func (r *TaskReconciler) resolveModelCredential(ctx context.Context, atespace string, m *v1alpha1.Model) (*modelCredential, error) {
+	cred := &modelCredential{baseURL: m.GetSpec().GetBaseUrl()}
+	ref := m.GetSpec().GetSecretKey()
+	if ref.GetName() == "" || ref.GetKey() == "" {
+		return cred, nil
+	}
+	if r.SecretResolver == nil {
+		return nil, fmt.Errorf("model %q declares secret %s/%s but no secret resolver is configured",
+			m.GetMetadata().GetName(), ref.GetName(), ref.GetKey())
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, secretLookupTimeout)
+	defer cancel()
+	value, err := r.SecretResolver(lookupCtx, atespace, ref.GetName(), ref.GetKey())
+	if err != nil {
+		return nil, fmt.Errorf("resolving secret %s/%s for model %q: %w",
+			ref.GetName(), ref.GetKey(), m.GetMetadata().GetName(), err)
+	}
+	if value == "" {
+		return nil, fmt.Errorf("secret %s/%s for model %q is empty",
+			ref.GetName(), ref.GetKey(), m.GetMetadata().GetName())
+	}
+	cred.keyName = ref.GetKey()
+	cred.value = value
+	return cred, nil
+}
+
+// StoreModelResolver returns a ModelResolver backed by a store. Shipped
+// deployments wire it in ax-controller; tests usually supply their own.
+func StoreModelResolver(s store.Store) ModelResolver {
+	return func(ctx context.Context, atespace, name string) (*v1alpha1.Model, error) {
+		return s.GetModel(ctx, atespace, name)
+	}
 }
 
 // lookupGeminiKey resolves the Gemini API key for the task container, preferring the

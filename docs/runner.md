@@ -16,8 +16,11 @@ The controller does not run `spec.command` as the container entrypoint. It alway
 | Container command | `/usr/local/bin/ax-task-runner`, always |
 | `AX_TASK_YAML` | The `Task` launch configuration as YAML, excluding status and the suspend flag |
 | `AX_WORKSPACES_YAML` | Every bound `Workspace` resource as a multi-document YAML stream, in the task's binding order |
+| `AX_MODEL_YAML` | The bound `Model` resource as YAML, when a workspace harness names one. It carries the provider, model id, `baseURL`, and the **reference** to the credential secret, never the secret value |
+| `AX_MODEL_BASE_URL` | The bound `Model`'s `baseURL`, empty when it declares none |
+| Credential variable | The secret value, under the name the bound `Model`'s `secretKey.key` declares (for example `DEEPSEEK_API_KEY`). Rotating the Kubernetes secret is picked up at the next task provisioning |
 | `spec.env` entries | Each one set directly in the container environment |
-| `GEMINI_API_KEY` | Set when the atespace has a Gemini credential configured |
+| `GEMINI_API_KEY` | Set when the atespace has a Gemini credential configured **and** no `Model` is bound. This is the legacy path; a task with a model reference gets its credential from the `Model` instead |
 | Volume | A durable directory mounted at `/workspace` |
 | Readiness probe | `GET /readyz` on port 80 |
 
@@ -35,6 +38,7 @@ The `/workspace` volume is what survives suspend and resume. Agent Substrate sna
 | `/readyz` | Return `503` until the workspace is prepared, then `200`. The controller polls this to set the task's `WorkspaceReady` condition, and `ax watch` shows the transition. |
 | `/metadata/v1alpha1/ax/task` | Return the `Task` as `application/yaml`. Optional, but your command and `ax` tooling may expect it. |
 | `/metadata/v1alpha1/ax/workspaces` | Return every bound `Workspace` as a multi-document YAML stream. Optional, as above. |
+| `/metadata/v1alpha1/ax/model` | Return the bound `Model` as `application/yaml`, or `404` when the task has no model binding. Optional, as above. It is the discovery channel a harness uses to generate its own provider configuration. |
 
 **Prepare each workspace once.** A task binds workspaces through `spec.workspaces`. For each binding, at its path, clone the Git repos from `spec.git`, create the skills path, write any MCP configuration, and run any environment bootstrap the binding asks for through its `goal`. A binding without a path lands at `/workspace/<name>`. Record that setup happened somewhere on the durable volume or in a known location, per workspace, then skip the work on later boots. Resume restarts the container, and re-cloning into a restored workspace would destroy the agent's state. The default runner writes a marker file under `/ax` for each workspace path.
 
@@ -98,6 +102,12 @@ func main() {
 	var task v1alpha1.Task
 	_ = yaml.Unmarshal([]byte(os.Getenv("AX_TASK_YAML")), &task)
 
+	// AX_MODEL_YAML is present only when the task is bound to a Model.
+	var boundModel v1alpha1.Model
+	if raw := os.Getenv("AX_MODEL_YAML"); raw != "" {
+		_ = yaml.Unmarshal([]byte(raw), &boundModel)
+	}
+
 	// AX_WORKSPACES_YAML is a multi-document stream, one Workspace per document.
 	var workspaces []*v1alpha1.Workspace
 	dec := yaml.NewDecoder(strings.NewReader(os.Getenv("AX_WORKSPACES_YAML")))
@@ -115,6 +125,7 @@ func main() {
 	err := runner.Run(ctx, runner.Config{
 		Task:       &task,
 		Workspaces: workspaces,
+		Model:      &boundModel,
 		OnCommandExit: func(exit runner.CommandExit) {
 			slog.Info("agent finished", "exitCode", exit.ExitCode)
 			// Upload artifacts, notify a webhook, and so on.
@@ -155,11 +166,12 @@ The controller provisions a dedicated Agent Substrate actor template for each di
 The default runner accepts its specs from files as well as the environment, which makes it easy to run outside a cluster. Your own runner should offer something similar:
 
 ```bash
-ax-task-runner --task-file task.yaml --workspace-file code.yaml --workspace-file tools.yaml --port 8080
+ax-task-runner --task-file task.yaml --workspace-file code.yaml --workspace-file tools.yaml --model-file model.yaml --port 8080
 
 # In another shell:
 curl -i http://127.0.0.1:8080/readyz
 curl -s http://127.0.0.1:8080/metadata/v1alpha1/ax/task
+curl -s http://127.0.0.1:8080/metadata/v1alpha1/ax/model
 ```
 
 Once the image is built, the fastest end-to-end check is a task with `debug: true` and `ax ssh` into it to confirm the workspace, the command, and the environment look the way you expect.
@@ -167,8 +179,9 @@ Once the image is built, the fastest end-to-end check is a task with `debug: tru
 ## Checklist
 
 - Executable present at `/usr/local/bin/ax-task-runner`
-- Reads `AX_TASK_YAML` and `AX_WORKSPACES_YAML`
+- Reads `AX_TASK_YAML`, `AX_WORKSPACES_YAML`, and (when present) `AX_MODEL_YAML`
 - Serves `/healthz` and `/readyz` on port 80, with `/readyz` returning `503` until every workspace is ready
+- Serves the bound `Model` at `/metadata/v1alpha1/ax/model` so a harness can configure its own provider, without ever serving a secret value
 - Prepares each workspace exactly once across restarts and resumes, at its own path
 - Starts `spec.command` in the first workspace with `AX_METADATA_URL` and `spec.env`
 - Keeps running after the command exits
