@@ -29,7 +29,7 @@ Evolve how AX maps tasks onto Agent Substrate actors to improve security boundar
 Make workspace synthesis and in-sandbox agent harnesses dynamic and extensible:
 
 - **Dynamic Agentic Environment Curation**: Enhance goal-driven workspace preparation (`Workspace.spec.goal` and `Task.spec.workspace.goal`) to dynamically inspect repository contents, resolve toolchains, discover relevant MCP servers and skills from registries, and curate a verified working environment automatically.
-- **Allow Customization**: Decouple the built-in workspace bootstrap and coding agent harness so users can configure custom agent runtimes, system instructions, tool policies, and model configurations.
+- **Allow Customization**: Decouple the built-in workspace bootstrap and coding agent harness so users can configure custom agent runtimes, system instructions, tool policies, and model configurations. *Partially delivered*: `Workspace.spec.harness` selects the runtime (Antigravity or DeepSeek Harness) with per-harness image, command, environment, system instructions, and model reference, and `Model` providers are pluggable adapters validated at apply time — see [DeepSeek Harness](deepseek-harness.md). Tool policies still require the curation work above.
 
 
 ## 4. Networking, Identity, Governance & Observability
