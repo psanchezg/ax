@@ -583,7 +583,7 @@ spec:
   harness:
     kind: deepseek-harness
     image: "ghcr.io/org/ax-dsh-runner:1"
-    command: ["dsh", "--profile", "ax-headless"]
+    command: ["dsh", "--profile", "headless"]
     env:
       - name: DSH_LOG_LEVEL
         value: info
@@ -622,7 +622,7 @@ func TestWorkspace_Harness_RoundTrip(t *testing.T) {
 			Harness: &v1alpha1.AgentHarness{
 				Kind:               "deepseek-harness",
 				Image:              "ghcr.io/org/ax-dsh-runner:1",
-				Command:            []string{"dsh", "--profile", "ax-headless"},
+				Command:            []string{"dsh", "--profile", "headless"},
 				ModelRef:           "deepseek",
 				Env:                []*v1alpha1.EnvVar{{Name: "DSH_LOG_LEVEL", Value: "info"}},
 				SystemInstructions: "Be terse.",

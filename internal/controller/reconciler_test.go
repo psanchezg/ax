@@ -513,7 +513,7 @@ func modelBoundTask(modelRef string) (*v1alpha1.Task, *v1alpha1.Workspace) {
 		Metadata:   &v1alpha1.ObjectMeta{Name: "dsh-task", Atespace: "default"},
 		Spec: &v1alpha1.TaskSpec{
 			Image:   "ghcr.io/org/ax-dsh-runner:1",
-			Command: []string{"dsh", "--profile", "ax-headless", "do the thing"},
+			Command: []string{"dsh", "--profile", "headless", "do the thing"},
 		},
 	}
 	ws := &v1alpha1.Workspace{
@@ -703,4 +703,35 @@ func conditionReason(task *v1alpha1.Task, condType string) string {
 		}
 	}
 	return ""
+}
+
+// TestReconcile_HarnessImageOverride covers the per-harness runtime: a harness
+// can name the image its tasks need, and an explicit task image still wins.
+func TestReconcile_HarnessImageOverride(t *testing.T) {
+	ctx := context.Background()
+	_, client := startMockSubstrate(t)
+
+	reconciler := controller.NewTaskReconciler(client, "test-template", "ax-system")
+	reconciler.WorkspaceReadyTimeout = 200 * time.Millisecond
+	reconciler.SecretResolver = noSecrets
+
+	task, ws := modelBoundTask("")
+	ws.Spec.Harness = &v1alpha1.AgentHarness{Image: "ghcr.io/org/ax-dsh-runner:1"}
+	if _, err := reconciler.Reconcile(ctx, task, ws); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+	if task.Spec.Image != "ghcr.io/org/ax-dsh-runner:1" {
+		t.Errorf("expected the harness image, got %q", task.Spec.Image)
+	}
+
+	// An explicit task image is not overridden.
+	task, ws = modelBoundTask("")
+	ws.Spec.Harness = &v1alpha1.AgentHarness{Image: "ghcr.io/org/ax-dsh-runner:1"}
+	task.Spec.Image = "ghcr.io/org/custom:9"
+	if _, err := reconciler.Reconcile(ctx, task, ws); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+	if task.Spec.Image != "ghcr.io/org/custom:9" {
+		t.Errorf("expected the task image to win, got %q", task.Spec.Image)
+	}
 }
