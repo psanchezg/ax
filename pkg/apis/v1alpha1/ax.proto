@@ -194,6 +194,30 @@ message WorkspaceSpec {
   repeated GitRepo git = 1;
   MCPConfig mcp = 2;
   SkillsConfig skills = 3;
+  // harness selects and configures the in-sandbox agent harness. Unset keeps
+  // the Antigravity bootstrap.
+  AgentHarness harness = 4;
+}
+
+// AgentHarness binds an in-sandbox agent harness to a workspace.
+message AgentHarness {
+  // kind selects the built-in integration: "antigravity" or
+  // "deepseek-harness". Unset means "antigravity".
+  string kind = 1;
+  // image overrides the task runner image, since each harness has its own
+  // runtime (Python + google-antigravity vs Node + @deepseek-ai/dsh).
+  string image = 2;
+  // command overrides the harness invocation; defaults per kind.
+  repeated string command = 3;
+  // model_ref names the Model resource whose credentials and endpoint this
+  // harness should use. json_name keeps the `modelRef` spelling in YAML and
+  // JSON.
+  string model_ref = 4 [json_name = "modelRef"];
+  // env is merged into the harness process environment.
+  repeated EnvVar env = 5;
+  // system_instructions overrides the harness persona. json_name keeps the
+  // `systemInstructions` spelling in YAML and JSON.
+  string system_instructions = 6 [json_name = "systemInstructions"];
 }
 
 message GitRepo {

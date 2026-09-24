@@ -15,11 +15,13 @@
 package v1alpha1_test
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/ax/pkg/apis/v1alpha1"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -544,5 +546,116 @@ func TestModel_BaseURL_RoundTrip(t *testing.T) {
 	}
 	if !proto.Equal(want, &got) {
 		t.Errorf("model round trip changed:\n%s", out)
+	}
+}
+
+func TestWorkspace_Harness_UnmarshalYAML(t *testing.T) {
+	// Both camelCase spellings (modelRef, systemInstructions) and the proto
+	// field names decode to the same fields.
+	for _, spelling := range []string{"modelRef: deepseek", "model_ref: deepseek"} {
+		doc := `
+kind: Workspace
+spec:
+  harness:
+    kind: deepseek-harness
+    image: "ghcr.io/org/ax-dsh-runner:1"
+    command: ["dsh", "--profile", "ax-headless"]
+    env:
+      - name: DSH_LOG_LEVEL
+        value: info
+    systemInstructions: Be terse.
+    ` + spelling + `
+`
+		var ws v1alpha1.Workspace
+		if err := yaml.Unmarshal([]byte(doc), &ws); err != nil {
+			t.Fatalf("unmarshal: %v\n%s", err, doc)
+		}
+		h := ws.Spec.GetHarness()
+		if h.GetKind() != "deepseek-harness" || h.GetImage() != "ghcr.io/org/ax-dsh-runner:1" {
+			t.Errorf("unexpected harness: %+v", h)
+		}
+		if len(h.GetCommand()) != 3 || h.GetCommand()[0] != "dsh" {
+			t.Errorf("unexpected command: %+v", h.GetCommand())
+		}
+		if h.GetModelRef() != "deepseek" {
+			t.Errorf("model ref not set from %q", spelling)
+		}
+		if len(h.GetEnv()) != 1 || h.GetEnv()[0].GetName() != "DSH_LOG_LEVEL" {
+			t.Errorf("unexpected env: %+v", h.GetEnv())
+		}
+		if h.GetSystemInstructions() != "Be terse." {
+			t.Errorf("unexpected system instructions: %q", h.GetSystemInstructions())
+		}
+	}
+}
+
+func TestWorkspace_Harness_RoundTrip(t *testing.T) {
+	want := &v1alpha1.Workspace{
+		ApiVersion: v1alpha1.APIVersion,
+		Kind:       v1alpha1.KindWorkspace,
+		Metadata:   &v1alpha1.ObjectMeta{Name: "dsh-ws", Atespace: "default"},
+		Spec: &v1alpha1.WorkspaceSpec{
+			Harness: &v1alpha1.AgentHarness{
+				Kind:               "deepseek-harness",
+				Image:              "ghcr.io/org/ax-dsh-runner:1",
+				Command:            []string{"dsh", "--profile", "ax-headless"},
+				ModelRef:           "deepseek",
+				Env:                []*v1alpha1.EnvVar{{Name: "DSH_LOG_LEVEL", Value: "info"}},
+				SystemInstructions: "Be terse.",
+			},
+		},
+	}
+	out, err := yaml.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"modelRef: deepseek", "systemInstructions: Be terse."} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("yaml missing %s:\n%s", want, out)
+		}
+	}
+	var got v1alpha1.Workspace
+	if err := yaml.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if !proto.Equal(want, &got) {
+		t.Errorf("workspace round trip changed:\n%s", out)
+	}
+}
+
+func TestWire_RoundTrip_PreservesUnknownFields(t *testing.T) {
+	// Version skew (SC-006): an old binary meeting a newer field keeps it on
+	// the wire without loss. Field 15 does not exist in ModelSpec today, so it
+	// decodes as unknown exactly the way a future field would in an old build.
+	raw := protowire.AppendTag(nil, 15, protowire.BytesType)
+	raw = protowire.AppendString(raw, "future-value")
+	raw = protowire.AppendTag(raw, 1, protowire.BytesType)
+	raw = protowire.AppendString(raw, "openai")
+
+	var spec v1alpha1.ModelSpec
+	if err := proto.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	if spec.GetProvider() != "openai" {
+		t.Fatalf("known field lost: %+v", &spec)
+	}
+	unknown := spec.ProtoReflect().GetUnknown()
+	if len(unknown) == 0 {
+		t.Fatal("expected the unknown field to be preserved after decode")
+	}
+
+	out, err := proto.Marshal(&spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var again v1alpha1.ModelSpec
+	if err := proto.Unmarshal(out, &again); err != nil {
+		t.Fatal(err)
+	}
+	if got := again.ProtoReflect().GetUnknown(); !bytes.Equal(got, unknown) {
+		t.Errorf("unknown fields changed on the wire: %x != %x", got, unknown)
+	}
+	if again.GetProvider() != "openai" {
+		t.Errorf("known field lost on the wire: %+v", &again)
 	}
 }
