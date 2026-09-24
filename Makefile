@@ -23,6 +23,9 @@ CONTAINER_CLI ?= $(shell which podman 2>/dev/null || which docker 2>/dev/null)
 # TASK_RUNNER_GOARCH=amd64 for a linux/amd64 cluster on an Apple Silicon machine.
 TASK_RUNNER_GOARCH ?= $(shell go env GOARCH)
 DSH_TASK_RUNNER_REPO ?= $(AX_IMAGE_REPO)/ax-dsh-runner
+# Tag for the DeepSeek Harness task-runner image, so the same value can be
+# referenced from a manifest and from docker: DSH_TASK_RUNNER_TAG=<tag>.
+DSH_TASK_RUNNER_TAG ?= latest
 
 .PHONY: all build build-binaries build-task-runner build-task-runner-dsh install push push-task-runner push-task-runner-dsh deploy deploy-controller deploy-server deploy-redis apply-example test clean
 
@@ -66,18 +69,22 @@ push-task-runner: build-task-runner
 # (Node runtime instead of Python) for TASK_RUNNER_GOARCH. The binary and the
 # image are built for the same architecture so the image runs on the cluster's
 # nodes, which matters on Apple Silicon where kind nodes are arm64:
-#   make build-task-runner-dsh TASK_RUNNER_GOARCH=arm64
+#   make build-task-runner-dsh TASK_RUNNER_GOARCH=arm64 DSH_TASK_RUNNER_TAG=v1
 build-task-runner-dsh:
 	@echo "==> Cross-compiling ax-task-runner for linux/$(TASK_RUNNER_GOARCH)..."
 	@mkdir -p bin/linux_$(TASK_RUNNER_GOARCH)
 	GOOS=linux GOARCH=$(TASK_RUNNER_GOARCH) CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/linux_$(TASK_RUNNER_GOARCH)/ax-task-runner ./cmd/ax-task-runner
-	@echo "==> Building container image $(DSH_TASK_RUNNER_REPO):latest using $(CONTAINER_CLI)..."
-	$(CONTAINER_CLI) build --platform linux/$(TASK_RUNNER_GOARCH) --build-arg TARGETARCH=$(TASK_RUNNER_GOARCH) -t $(DSH_TASK_RUNNER_REPO):latest -f Dockerfile.task-runner-dsh .
+	@echo "==> Building container image $(DSH_TASK_RUNNER_REPO):$(DSH_TASK_RUNNER_TAG) using $(CONTAINER_CLI)..."
+	@# DOCKER_DEFAULT_PLATFORM pins the base image too, which matters with the classic
+	@# builder (no buildx): it does not derive TARGETARCH, and a host-wide
+	@# DOCKER_DEFAULT_PLATFORM=linux/amd64 would otherwise select the wrong base.
+	DOCKER_DEFAULT_PLATFORM=linux/$(TASK_RUNNER_GOARCH) \
+	  $(CONTAINER_CLI) build --platform linux/$(TASK_RUNNER_GOARCH) --build-arg TARGETARCH=$(TASK_RUNNER_GOARCH) -t $(DSH_TASK_RUNNER_REPO):$(DSH_TASK_RUNNER_TAG) -f Dockerfile.task-runner-dsh .
 
 # Push the DeepSeek Harness task-runner image to its registry
 push-task-runner-dsh: build-task-runner-dsh
-	@echo "==> Pushing DeepSeek Harness task runner image to $(DSH_TASK_RUNNER_REPO):latest..."
-	$(CONTAINER_CLI) push $(DSH_TASK_RUNNER_REPO):latest
+	@echo "==> Pushing DeepSeek Harness task runner image to $(DSH_TASK_RUNNER_REPO):$(DSH_TASK_RUNNER_TAG)..."
+	$(CONTAINER_CLI) push $(DSH_TASK_RUNNER_REPO):$(DSH_TASK_RUNNER_TAG)
 
 # Build and push all images
 push: push-task-runner
