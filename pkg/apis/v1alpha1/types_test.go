@@ -462,3 +462,52 @@ spec:
 		t.Errorf("round trip changed the task:\n%s", out)
 	}
 }
+
+func TestModel_BaseURL_YAMLFieldNames(t *testing.T) {
+	// Both the documented `baseURL` spelling (json_name) and the proto field
+	// name `base_url` decode to the same field (dual-spelling protojson input).
+	const want = "https://api.deepseek.com/v1"
+	for _, doc := range []string{
+		"kind: Model\nspec:\n  baseURL: " + want + "\n",
+		"kind: Model\nspec:\n  base_url: " + want + "\n",
+	} {
+		var m v1alpha1.Model
+		if err := yaml.Unmarshal([]byte(doc), &m); err != nil {
+			t.Fatalf("unmarshal: %v\n%s", err, doc)
+		}
+		if m.Spec.GetBaseUrl() != want {
+			t.Errorf("base URL not set from:\n%s", doc)
+		}
+	}
+}
+
+func TestModel_BaseURL_RoundTrip(t *testing.T) {
+	want := &v1alpha1.Model{
+		ApiVersion: v1alpha1.APIVersion,
+		Kind:       v1alpha1.KindModel,
+		Metadata:   &v1alpha1.ObjectMeta{Name: "deepseek", Atespace: "default"},
+		Spec: &v1alpha1.ModelSpec{
+			Provider: "openai",
+			Model:    "deepseek-chat",
+			BaseUrl:  "https://api.deepseek.com/v1",
+			SecretKey: &v1alpha1.SecretKeyRef{
+				Name: "deepseek-api-secret",
+				Key:  "DEEPSEEK_API_KEY",
+			},
+		},
+	}
+	out, err := yaml.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "baseURL: https://api.deepseek.com/v1") {
+		t.Errorf("expected the baseURL spelling in output:\n%s", out)
+	}
+	var got v1alpha1.Model
+	if err := yaml.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if !proto.Equal(want, &got) {
+		t.Errorf("model round trip changed:\n%s", out)
+	}
+}
