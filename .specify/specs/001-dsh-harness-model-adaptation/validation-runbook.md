@@ -409,6 +409,33 @@ Y una advertencia sobre kind: su `--wait` por defecto **no espera al control-pla
 que un nodo roto se reporta como creación correcta. Comprueba siempre con
 `kubectl get nodes` que el nodo está `Ready` antes de seguir.
 
+#### ⚠️ Si el install falla con `gcloud.auth.docker-helper`
+
+No hace falta ningún login de Google para instalar Substrate en kind — el script incluso
+hace `unset GCE_REGION ... PROJECT_ID`. Pero si tu `~/.docker/config.json` mapea `gcr.io`
+al credential helper de `gcloud` y tu token está caducado, **ko no podrá bajar ni una
+imagen pública** (`gcr.io/distroless/...`) y el install aborta con:
+
+```text
+ERROR: (gcloud.auth.docker-helper) ... Reauthentication failed
+error getting credentials - err: exit status 1
+```
+
+Dos salidas:
+
+```bash
+# A) Reautenticar gcloud una vez (interactivo, abre el navegador)
+gcloud auth login
+
+# B) No tocar tu configuración: darle a esta ejecución un DOCKER_CONFIG sin helpers
+mkdir -p /tmp/docker-nogcloud && echo '{}' > /tmp/docker-nogcloud/config.json
+export DOCKER_CONFIG=/tmp/docker-nogcloud
+```
+
+La B basta para todo este flujo (todas las imágenes son públicas y el registry local no
+pide credenciales), y también aplica al `ko apply` del plano de control de AX, cuyas
+imágenes base salen de `gcr.io/distroless`.
+
 Después, AX. El registry local del clúster es lo que permite desplegar sin publicar nada:
 
 ```bash
