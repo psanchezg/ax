@@ -541,3 +541,32 @@ func TestModel_API_RoundTrip(t *testing.T) {
 		t.Errorf("model round trip changed:\n%s", out)
 	}
 }
+
+func TestValidateModel(t *testing.T) {
+	valid := []*v1alpha1.Model{
+		nil,
+		{},
+		{Spec: &v1alpha1.ModelSpec{}},
+		{Spec: &v1alpha1.ModelSpec{Provider: "openai", BaseUrl: "https://api.deepseek.com/v1"}},
+		{Spec: &v1alpha1.ModelSpec{Provider: "openai", BaseUrl: "http://vllm.default.svc.cluster.local:8000/v1"}},
+		{Spec: &v1alpha1.ModelSpec{SecretKey: &v1alpha1.SecretKeyRef{Name: "s", Key: "DEEPSEEK_API_KEY"}}},
+	}
+	for i, m := range valid {
+		if err := v1alpha1.ValidateModel(m); err != nil {
+			t.Errorf("case %d: expected valid, got %v", i, err)
+		}
+	}
+
+	invalid := []*v1alpha1.Model{
+		{Spec: &v1alpha1.ModelSpec{BaseUrl: "api.deepseek.com/v1"}},
+		{Spec: &v1alpha1.ModelSpec{BaseUrl: "ftp://api.deepseek.com"}},
+		{Spec: &v1alpha1.ModelSpec{BaseUrl: "https://"}},
+		{Spec: &v1alpha1.ModelSpec{SecretKey: &v1alpha1.SecretKeyRef{Key: "not a var"}}},
+		{Spec: &v1alpha1.ModelSpec{SecretKey: &v1alpha1.SecretKeyRef{Key: "1LEADING_DIGIT"}}},
+	}
+	for i, m := range invalid {
+		if err := v1alpha1.ValidateModel(m); err == nil {
+			t.Errorf("case %d: expected invalid, got nil", i)
+		}
+	}
+}

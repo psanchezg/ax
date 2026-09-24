@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -239,6 +240,35 @@ func (s *TaskSpec) WorkspacePaths() []string {
 		}
 	}
 	return paths
+}
+
+// ValidateModel reports the first schema-level problem with a model's spec: a
+// base URL that is not an absolute http(s) URL, or a secret key name that
+// cannot be an environment variable. Provider membership is validated by the
+// API server against the provider registry, which this package cannot see.
+// It is called before saving.
+func ValidateModel(m *Model) error {
+	spec := m.GetSpec()
+	if spec == nil {
+		return nil
+	}
+	if baseURL := spec.GetBaseUrl(); baseURL != "" {
+		parsed, err := url.Parse(baseURL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return fmt.Errorf("spec.baseURL: %q must be an absolute http(s) URL", baseURL)
+		}
+	}
+	key := spec.GetSecretKey().GetKey()
+	if key == "" {
+		return nil
+	}
+	for i, r := range key {
+		valid := r == '_' || ('A' <= r && r <= 'Z') || ('a' <= r && r <= 'z') || (i > 0 && '0' <= r && r <= '9')
+		if !valid {
+			return fmt.Errorf("spec.secretKey.key: %q must be a valid environment variable name", key)
+		}
+	}
+	return nil
 }
 
 // ValidateTask reports the first problem with a task's spec that would make it
