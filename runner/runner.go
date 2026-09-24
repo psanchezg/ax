@@ -131,6 +131,9 @@ func Run(ctx context.Context, cfg Config) error {
 		mounts = []mount{{ref: &v1alpha1.WorkspaceRef{}, path: DefaultWorkspacePath}}
 	}
 	wsPath := mounts[0].path
+	// The first workspace's goal is the task's prompt, matching the choice of
+	// the first workspace as the command's working directory.
+	goal := mounts[0].ref.GetGoal()
 	workspaces := make([]*v1alpha1.Workspace, 0, len(mounts))
 	paths := make([]string, len(mounts))
 	for i, m := range mounts {
@@ -170,6 +173,12 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 
 	cmdArgs := cfg.Task.GetSpec().GetCommand()
+	if len(cmdArgs) == 0 {
+		// A harness may declare the command that answers the goal; otherwise
+		// there is nothing to run and the runner just serves metadata.
+		harness := workspace.TaskHarness(workspaces)
+		cmdArgs = workspace.HarnessCommand(harness.GetKind(), harness, goal)
+	}
 	if len(cmdArgs) == 0 {
 		slog.Info("no task command specified; serving metadata until stopped")
 		<-ctx.Done()

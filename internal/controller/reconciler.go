@@ -31,6 +31,7 @@ import (
 	"github.com/google/ax/internal/model"
 	"github.com/google/ax/internal/store"
 	"github.com/google/ax/internal/substrate"
+	"github.com/google/ax/internal/workspace"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -119,6 +120,11 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, task *v1alpha1.Task, gat
 
 	if task.Spec == nil {
 		task.Spec = &v1alpha1.TaskSpec{}
+	}
+	if task.Spec.Image == "" {
+		// A harness may need its own runtime (Node for DSH, Python for
+		// Antigravity), so it can declare the image for its tasks.
+		task.Spec.Image = workspace.HarnessImage(workspaces)
 	}
 	if task.Spec.Image == "" {
 		task.Spec.Image = v1alpha1.DefaultTaskImage
