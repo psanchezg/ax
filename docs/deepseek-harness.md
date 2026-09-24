@@ -53,20 +53,22 @@ DSH needs Node; Antigravity needs Python. Rather than growing one image, AX
 ships a second one, so an Antigravity-based task is unaffected:
 
 ```bash
-make build-task-runner-dsh                                   # host architecture
-make build-task-runner-dsh TASK_RUNNER_GOARCH=arm64           # or one node architecture
-make push-task-runner-dsh DSH_TASK_RUNNER_REPO=<registry>/ax-dsh-runner
+make build-task-runner-dsh                                    # host architecture, :latest
+make build-task-runner-dsh TASK_RUNNER_GOARCH=arm64 DSH_TASK_RUNNER_TAG=v1
+make push-task-runner-dsh DSH_TASK_RUNNER_REPO=<registry>/ax-dsh-runner DSH_TASK_RUNNER_TAG=v1
 ```
 
 `make build-task-runner-dsh` cross-compiles `ax-task-runner` for
 `TASK_RUNNER_GOARCH` (default: the host's `go env GOARCH`) and builds
-`Dockerfile.task-runner-dsh` for the same platform. That matters the moment the
-cluster's nodes are not amd64 — on an Apple Silicon Mac, kind nodes are arm64, and
-an amd64 image there either fails to start or needs emulation. The
-`Dockerfile` selects the matching build with `COPY bin/linux_${TARGETARCH}/`, so
-build it through the Makefile target or pass `--platform` and
-`--build-arg TARGETARCH` yourself; a mismatch silently copies the wrong binary
-into an otherwise valid image.
+`Dockerfile.task-runner-dsh` for the same platform, tagged
+`DSH_TASK_RUNNER_TAG` (default `latest`). That matters the moment the cluster's
+nodes are not amd64 — on an Apple Silicon Mac, kind nodes are arm64, and an amd64
+image there either fails to start or needs emulation. The `Dockerfile` selects the
+matching build with `COPY bin/linux_${TARGETARCH}/` and then checks the copied
+binary against the image platform, so a mismatch fails the build with
+`ax-task-runner is 3e00 but this image is aarch64` instead of producing an image
+that dies at exec time. Build it through the Makefile target, or pass
+`--platform` and `--build-arg TARGETARCH` yourself.
 
 `Dockerfile.task-runner-dsh` installs `@deepseek-ai/dsh` at the version pinned by
 its `DSH_VERSION` build argument and copies the same task runner. The image runs
