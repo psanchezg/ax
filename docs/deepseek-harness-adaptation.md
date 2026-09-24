@@ -282,7 +282,7 @@ message WorkspaceSpec {
   repeated GitRepo git = 1;
   MCPConfig mcp = 2;
   SkillsConfig skills = 3;
-  AgentHarness harness = 4;   // new
+  AgentHarness harness = 5;   // new
 }
 ```
 
