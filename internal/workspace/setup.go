@@ -113,8 +113,17 @@ func SetupWorkspace(ctx context.Context, ws *v1alpha1.Workspace, targetPath stri
 		res.SkillsMounted = setupSkills(ws.Spec.Skills)
 	}
 
-	if goal != "" {
-		res.BootstrapRan = runBootstrap(ctx, goal, targetPath)
+	harness := ws.GetSpec().GetHarness()
+	if harness.GetKind() != "" || goal != "" {
+		h, err := ResolveHarness(harness.GetKind())
+		if err != nil {
+			// Fail closed: an unknown harness must not silently skip setup.
+			return res, err
+		}
+		res.BootstrapRan, err = h.Setup(ctx, harness, goal, targetPath)
+		if err != nil {
+			return res, err
+		}
 	}
 
 	if !gitOK {
@@ -267,66 +276,6 @@ func setupSkills(skills *v1alpha1.SkillsConfig) string {
 		slog.Warn("creating skills dir", "path", skills.Path, "error", err)
 	}
 	return skills.Path
-}
-
-// runBootstrap hands the goal to the Antigravity agent so it can prepare the workspace.
-// It reports whether the agent ran to completion. The agent needs the bootstrap script
-// installed and an API key in the environment; when either is missing the step is
-// skipped with a log line. Failures are logged and otherwise ignored so the task's own
-// command still starts.
-func runBootstrap(ctx context.Context, goal, targetPath string) bool {
-	if _, err := os.Stat(bootstrapScriptPath); err != nil {
-		slog.Info("Antigravity bootstrap script not installed; skipping", "script", bootstrapScriptPath)
-		return false
-	}
-	if os.Getenv(bootstrapAPIKeyEnv) == "" {
-		slog.Warn("workspace goal set but no API key available; skipping Antigravity bootstrap", "env", bootstrapAPIKeyEnv)
-		return false
-	}
-
-	timeout := bootstrapTimeout()
-	slog.Info("invoking Antigravity workspace bootstrap with goal", "goal", goal, "dir", targetPath, "timeout", timeout)
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	dataDir := filepath.Join(AXDir, bootstrapDataDir)
-	if err := os.MkdirAll(dataDir, dirPerm); err != nil {
-		slog.Warn("creating Antigravity data dir", "dir", dataDir, "error", err)
-	}
-
-	cmd := exec.CommandContext(ctx, "python3", bootstrapScriptPath,
-		"--goal", goal,
-		"--workspace", targetPath,
-		"--data-dir", dataDir,
-	)
-	cmd.Dir = targetPath
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			slog.Warn("Antigravity bootstrap timed out (continuing)", "timeout", timeout)
-		} else {
-			slog.Warn("Antigravity bootstrap failed (continuing)", "error", err)
-		}
-		return false
-	}
-	slog.Info("Antigravity bootstrap completed successfully")
-	return true
-}
-
-// bootstrapTimeout returns the configured bootstrap timeout, falling back to the default
-// when the override is unset or unparsable.
-func bootstrapTimeout() time.Duration {
-	raw := os.Getenv(bootstrapTimeoutEnv)
-	if raw == "" {
-		return defaultBootstrapTimeout
-	}
-	d, err := time.ParseDuration(raw)
-	if err != nil || d <= 0 {
-		slog.Warn("invalid bootstrap timeout; using default", "env", bootstrapTimeoutEnv, "value", raw, "default", defaultBootstrapTimeout)
-		return defaultBootstrapTimeout
-	}
-	return d
 }
 
 // MarkerName returns the maiden-run marker file name for a workspace mounted at
