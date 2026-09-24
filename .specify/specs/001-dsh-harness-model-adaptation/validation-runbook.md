@@ -20,9 +20,28 @@ make build                           # bin/ax, bin/ax-server, bin/ax-controller
 |---|---|
 | `go version` | 1.27+ |
 | `docker info` | daemon accesible (nivel 2 y build de imágenes) |
-| `kubectl config current-context` | el clúster de pruebas (nivel 2) |
 | `ko version` | instalado (nivel 2: `make deploy`) |
 | `dsh --help` | CLI presente (nivel 0.5) |
+
+### ⚠️ Antes de nada: contra qué clúster apunta kubectl
+
+Los niveles 0 y 1 **no tocan Kubernetes**: el 0 ejecuta el runner en local y el 1 habla
+con `ax-server` por `AX_SERVER`. Todo lo del nivel 2 —`kubectl`, `make deploy`, y
+cualquier `bin/ax` **sin** `--server`, que resuelve el servidor por el contexto activo—
+sigue tu kubeconfig. En esta máquina el contexto activo es un clúster **remoto**, así que
+captura el original y comprueba dónde estás *antes* de escribir nada:
+
+```bash
+export ORIG_CTX="$(kubectl config current-context)"   # para volver al terminar
+echo "contexto actual: $ORIG_CTX"
+kubectl config get-contexts | sed -n '1,10p'
+```
+
+Si ese contexto es un clúster compartido o de producción, **no** ejecutes el nivel 2
+sobre él: `make deploy` instalaría AX (namespace `ax-system`, RBAC de lectura de secrets,
+Redis, controller) y aplicaría egress ahí. El nivel 2 va sobre un clúster desechable
+local (`kind`, §3.1) y nunca sobre el remoto. Los niveles 0 y 1 puedes hacerlos ya sin
+tocar el contexto.
 
 Exporta tus valores una vez por shell (no los commitees):
 
@@ -170,7 +189,9 @@ proveedor → la clave o el `baseURL`; timeout → endpoint/egress de tu red.
 
 Prueba la validación real de `ax apply` y la persistencia, sin ejecutar tareas. Los
 puertos van desplazados (16379/18080) para no chocar con un Redis o un 8080 que ya
-tengas levantados.
+tengas levantados. El `AX_SERVER` de la primera línea es lo que mantiene este nivel fuera
+de Kubernetes: sin él, `bin/ax` resolvería el servidor por tu contexto activo (tu clúster
+remoto).
 
 ```bash
 docker run -d --rm --name ax-runbook-redis -p 16379:6379 redis:7-alpine
@@ -239,10 +260,40 @@ alcanzable en `api.ate-system.svc.cluster.local:443`, este nivel no arranca.
 
 ### 3.1 Clúster y AX
 
+**Opción A (recomendada): kubeconfig dedicado.** Tu configuración normal no se toca —ni
+el contexto activo, ni la lista de clústeres—, y todo lo de este nivel queda contenido en
+un fichero temporal que borras al final:
+
+```bash
+export KUBECONFIG=/tmp/ax-test.kubeconfig   # este shell ya no ve tu clúster remoto
+kind create cluster --name ax-test          # escribe el contexto en ESE fichero
+# equivalente explícito: kind create cluster --name ax-test --kubeconfig /tmp/ax-test.kubeconfig
+kubectl config current-context              # → kind-ax-test
+kubectl cluster-info >/dev/null && echo "cluster ok"
+```
+
+`KUBECONFIG` es por shell: las secciones §3.3, §3.4 y §6 deben ejecutarse en el mismo
+shell (o reexportar la variable). Si abres otra terminal, repite el `export` antes de
+cualquier `kubectl` o `bin/ax`.
+
+**Opción B: usar tu kubeconfig y cambiar de contexto.** Válida, pero tu contexto activo
+cambia y hay que acordarse de volver:
+
 ```bash
 kind create cluster --name ax-test
-kubectl cluster-info >/dev/null && echo "cluster ok"
-# Instala Agent Substrate en este clúster y comprueba su Control API:
+kubectl config use-context kind-ax-test
+CTX="$(kubectl config current-context)"
+if [ "$CTX" = "kind-ax-test" ]; then echo "ok: $CTX"; else echo "ABORTA: estás en $CTX, no en kind-ax-test"; fi
+```
+
+Si la guardia imprime `ABORTA`, cambia de contexto antes de seguir. Recuerda que `bin/ax`
+también resuelve el servidor por el contexto activo (hace port-forward a `ax-system`): un
+`ax` sin `--server` desde el contexto remoto apuntaría al AX de *ese* clúster.
+
+Después, en cualquiera de las dos opciones:
+
+```bash
+# Instala Agent Substrate en ESTE clúster y comprueba su Control API:
 kubectl get svc -n ate-system
 
 export AX_IMAGE_REPO=$REGISTRY        # ko publica aquí las imágenes del plano de control
@@ -250,6 +301,7 @@ make deploy                           # redis + controller + server en ax-system
 kubectl get pods -n ax-system
 ```
 
+- [ ] `kubectl config current-context` = `kind-ax-test`
 - [ ] Substrate accesible
 - [ ] Pods de `ax-system` en `Running`
 
@@ -339,7 +391,15 @@ kind delete cluster --name ax-test
 docker rmi "$DSH_IMAGE" 2>/dev/null
 git checkout -- examples/workspace-dsh.yaml    # revierte la imagen que editaste
 rm -rf /tmp/ax-runbook
+
+# Según la opción que elegiste en §3.1:
+unset KUBECONFIG
+rm -f /tmp/ax-test.kubeconfig                  # Opción A: nada quedó en tu kubeconfig
+# kubectl config use-context "$ORIG_CTX"       # Opción B: vuelve a tu contexto de siempre
 ```
+
+Comprueba con `kubectl config current-context` que vuelves a ver tu clúster remoto (y que
+`kubectl config get-contexts` no ha cambiado) antes de seguir trabajando.
 
 ## 7. Qué hacer con los fallos
 
