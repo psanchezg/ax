@@ -1,6 +1,14 @@
 # Adapting AX to DeepSeek Harness and non-Gemini models
 
-Status: proposal. Nothing in this document is implemented yet.
+Status: proposal. Phases 0, 1, 2, 3, and 5 of the plan below are now implemented —
+see [DeepSeek Harness](deepseek-harness.md), [Runners](runner.md), and
+[Running DeepSeek Harness today](dsh-phase-0.md). Phase 4 (manifest-driven
+injection of MCP servers, skills, `AGENTS.md`, and presets) remains roadmap work
+under "Dynamic Agentic Environment Curation" in [roadmap.md](roadmap.md), and the
+implementation differs from the sketch below in one place: the DSH image runs the
+shipped `headless` profile rather than a custom profile created from it, because
+`--from-default-profile` creates the profile and boots it, so it cannot run
+during an image build.
 
 This document reviews [`DESIGN.md`](../DESIGN.md) against a concrete goal: run
 agents in AX using **DeepSeek Harness (DSH)** instead of (or alongside)
