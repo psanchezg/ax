@@ -19,12 +19,13 @@ FROM node:22-slim
 # egress and no profile has to be baked into the image.
 ARG DSH_VERSION=0.1.5-rc.2
 
-# The task runner is a cross-compiled Go binary, so the COPY below has to take
-# the build that matches the image platform. BuildKit sets TARGETARCH from
-# --platform (docker build --platform linux/arm64 -> arm64); the default keeps
-# the historical amd64 layout working when it is not set. A mismatch would copy
-# the wrong binary into an otherwise valid image, so make build-task-runner-dsh
-# passes both explicitly.
+# The task runner is a cross-compiled Go binary, so the COPY below has to take the
+# build that matches the image platform: an arm64 node cannot run an amd64 binary.
+# BuildKit derives TARGETARCH from --platform, but the classic builder does not, so
+# pass it explicitly (make build-task-runner-dsh passes both together). The default
+# keeps the amd64 layout both task-runner Dockerfiles have always used, and the
+# check after the COPY turns any mismatch into a failed build instead of a
+# container that dies at exec time in the cluster.
 ARG TARGETARCH=amd64
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -43,5 +44,21 @@ RUN npm install -g @deepseek-ai/dsh@${DSH_VERSION}
 ENV DSH_HOME=/ax/dsh
 
 COPY bin/linux_${TARGETARCH}/ax-task-runner /usr/local/bin/ax-task-runner
+
+# Fail the build, not the task, when the runner does not match this image's
+# platform. od reads e_machine from the ELF header: b700 is AArch64, 3e00 x86-64.
+RUN set -eu; \
+    case "$(uname -m)" in \
+      aarch64|arm64) want=b700 ;; \
+      x86_64|amd64)  want=3e00 ;; \
+      *) echo "unsupported build architecture: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    got="$(od -An -tx1 -j18 -N2 /usr/local/bin/ax-task-runner | tr -d ' \n')"; \
+    if [ "$got" != "$want" ]; then \
+      echo "ax-task-runner is $got but this image is $(uname -m) (TARGETARCH=${TARGETARCH})" >&2; \
+      echo "build it with: make build-task-runner-dsh TASK_RUNNER_GOARCH=$(uname -m)" >&2; \
+      exit 1; \
+    fi; \
+    echo "ax-task-runner matches $(uname -m): TARGETARCH=${TARGETARCH}, DSH_VERSION=${DSH_VERSION}"
 
 ENTRYPOINT ["/usr/local/bin/ax-task-runner"]
