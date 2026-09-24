@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/ax/internal/model"
 	"github.com/google/ax/internal/store"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 	"google.golang.org/grpc"
@@ -398,6 +399,14 @@ func (s *Server) ListModels(ctx context.Context, req *v1alpha1.ListModelsRequest
 func (s *Server) UpdateModel(ctx context.Context, req *v1alpha1.UpdateModelRequest) (*v1alpha1.Model, error) {
 	if req == nil || req.Model == nil {
 		return nil, status.Error(codes.InvalidArgument, "model required")
+	}
+	// A typo'd provider must fail at apply time, not silently later: the
+	// provider registry is the single source of truth for valid values.
+	if err := model.ValidateProvider(req.Model.GetSpec().GetProvider()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid model: %v", err)
+	}
+	if err := v1alpha1.ValidateModel(req.Model); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid model: %v", err)
 	}
 	req.Model.Metadata = defaultMetadata(req.Model.Metadata, func(atespace, name string) *v1alpha1.ObjectMeta {
 		existing, err := s.store.GetModel(ctx, atespace, name)
