@@ -71,19 +71,29 @@ version.
 The control plane resolves the workspace's `modelRef` and injects the credential
 under the name the `Model` declares, the endpoint as `AX_MODEL_BASE_URL`, and
 the resource itself as `AX_MODEL_YAML`. From that, the harness writes exactly one
-file — `$DSH_HOME/settings.yaml` — with the `llm-pi-ai` provider namespace:
+file — `$DSH_HOME/settings.yaml` — with two sections:
 
 ```yaml
+agent-default-model:
+  provider: deepseek              # the route below
+  model: deepseek-chat
 llm-pi-ai:
   providers:
-    deepseek:                       # named after the Model resource
+    deepseek:                     # named after the Model resource
       api: openai-completions
-      apiKeyEnv: DEEPSEEK_API_KEY   # a credential reference, never the value
+      apiKeyEnv: DEEPSEEK_API_KEY # a credential reference, never the value
       baseURL: https://api.deepseek.com/v1
       models:
         - id: deepseek-chat
           name: deepseek-chat
 ```
+
+Both are required, and the second one is easy to miss: the shipped profile mounts
+its own DeepSeek adapter as the default selection, so registering a provider route
+is not enough — a fresh agent would ask for that built-in route and never reach
+the `Model` AX resolved. `agent-default-model` is what points the agent at the
+route above. (This is not theoretical: the first version of this harness wrote only
+the provider section, and DSH answered `MISSING_CREDENTIAL` for its own route.)
 
 `apiKeyEnv` is resolved by DSH from the container environment per request, which
 is why AX injects the secret value under that name rather than a fixed
