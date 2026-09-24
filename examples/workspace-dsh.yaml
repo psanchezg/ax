@@ -1,0 +1,65 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Run a goal under DeepSeek Harness instead of Antigravity.
+#
+# The workspace selects the harness declaratively: `kind` picks the integration,
+# `modelRef` names the Model whose credential and endpoint the harness uses, and
+# `image` is the Node runner image that carries `dsh`. The task supplies only the
+# goal; the runner turns it into `dsh --profile headless "<goal>"`.
+#
+# Prerequisites:
+#
+#   kubectl create secret generic deepseek-api-secret \
+#     --from-literal=DEEPSEEK_API_KEY="<your-key>"
+#   ax apply -f examples/model-deepseek.yaml
+#   docker build --platform linux/amd64 -f Dockerfile.task-runner-dsh \
+#     -t ghcr.io/<org>/ax-dsh-runner:1 .    # make build-task-runner first
+#
+# Then:
+#
+#   ax apply -f examples/workspace-dsh.yaml   # applies the workspace and the goal task below
+---
+apiVersion: ax.io/v1alpha1
+kind: Workspace
+metadata:
+  name: dsh-ws
+  atespace: default
+spec:
+  harness:
+    kind: deepseek-harness
+    # Replace with your published image (pin a digest in production).
+    image: "ghcr.io/<org>/ax-dsh-runner:1"
+    modelRef: deepseek
+    env:
+      - name: DSH_LOG_LEVEL
+        value: info
+  git:
+    - name: origin
+      repo: "https://github.com/octocat/Hello-World.git"
+      branch: "master"
+      depth: 1
+---
+# A task with only a goal: the harness declares the command that answers it.
+apiVersion: ax.io/v1alpha1
+kind: Task
+metadata:
+  name: dsh-goal
+  atespace: default
+spec:
+  workspaces:
+    - name: dsh-ws
+      path: /workspace
+      goal: "Describe this repository and report what you found."
+  debug: true # serve guest services so `ax ssh` works; off by default
