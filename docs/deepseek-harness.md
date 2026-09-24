@@ -77,6 +77,29 @@ the installed package on first use, so first boot needs no registry egress and
 there is no profile directory in this repository to keep in sync with the CLI
 version.
 
+> **Known limitation: the npm install of the CLI does not boot inside a Linux
+> image.** Two failure modes were observed against `@deepseek-ai/dsh` 0.1.5-rc.2,
+> and both appear at boot as
+> `plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local` or
+> `Duplicate type name 'DSH_STARTUPINFOW'`:
+> a global `npm install -g` leaves `dsh-sandbox-local` outside the installation
+> closure the loader resolves from, and a project install (with or without a
+> version override, `npm dedupe`, or the nested copy removed) leaves two identical
+> copies that the loader imports twice. npm 10 and 12, `--legacy-peer-deps`, a
+> pnpm-enabled image, and installing the package as the root project from its
+> tarball were all tried; a working install (for example the Homebrew package on
+> macOS) has a flat `dsh/node_modules` with no duplicates, which npm's resolver does
+> not reproduce here and no official DSH image is published to borrow. The
+> `Dockerfile` keeps the closest recipe plus assertions that fail the build if the
+> plugin count or bundle version drift, but **treat the DSH install as an open
+> item**: build the harness image with DeepSeek's own tooling (or bring a working
+> image) and point `spec.harness.image` at it — everything else in this document,
+> including the generated `settings.yaml`, is independent of how DSH got there.
+>
+> Do not simply bump `DSH_VERSION`: `0.1.7-rc.2` boots, but it **ignores** the
+> `llm-pi-ai` provider section, so the request goes to DSH's built-in route instead
+> of the `Model` AX resolved.
+
 ## What the harness configures
 
 The control plane resolves the workspace's `modelRef` and injects the credential
