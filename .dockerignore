@@ -4,6 +4,9 @@
 .claude
 *.log
 tmp/
+# Local build output stays out of the context, except the cross-compiled task
+# runner that Dockerfile.task-runner and Dockerfile.task-runner-dsh COPY from
+# bin/linux_<arch>/. Ignoring bin/ outright breaks both image builds.
 bin/*
 !bin/linux_amd64
 !bin/linux_amd64/ax-task-runner
