@@ -37,7 +37,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g @deepseek-ai/dsh@${DSH_VERSION}
+# Install the CLI as a pinned project instead of a global package.
+#
+# Two failure modes come from letting npm resolve this tree freely, and both show up
+# only at boot inside a task:
+#   * a global install drops @deepseek-ai/dsh-sandbox-local on a peer conflict, and
+#     dsh dies with "plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local";
+#   * a caret range pulls dsh-base@0.1.5-rc.3 while the CLI is 0.1.5-rc.2, and npm
+#     nests a second (identical) copy of the plugin under dsh-base, so the loader
+#     imports it twice and dies with "Duplicate type name 'DSH_STARTUPINFOW'".
+# The override pins the bundle to the CLI's version, and dropping the nested duplicate
+# reproduces the layout of a working install: one copy hoisted next to the CLI, which
+# the nested dependent still resolves through its parent chain. The assertions below
+# fail the build rather than a task.
+RUN set -eu; \
+    mkdir -p /opt/dsh; \
+    cd /opt/dsh; \
+    npm init -y > /dev/null; \
+    npm pkg set "overrides.@deepseek-ai/dsh-base=${DSH_VERSION}" > /dev/null; \
+    npm install --no-audit --no-fund --save-exact "@deepseek-ai/dsh@${DSH_VERSION}" > /dev/null; \
+    npm dedupe > /dev/null; \
+    rm -rf /opt/dsh/node_modules/@deepseek-ai/dsh-base/node_modules/@deepseek-ai/dsh-sandbox-local; \
+    ln -sf /opt/dsh/node_modules/.bin/dsh /usr/local/bin/dsh; \
+    rm -rf /root/.npm; \
+    dsh --version; \
+    count="$(find /opt/dsh/node_modules -name dsh-sandbox-local -type d | wc -l | tr -d ' ')"; \
+    test "$count" = "1" || { echo "expected exactly 1 dsh-sandbox-local, found $count" >&2; exit 1; }; \
+    base="$(find /opt/dsh/node_modules -path '*dsh-base/package.json' | head -1)"; \
+    grep -q "\"version\": \"${DSH_VERSION}\"" "$base" || { echo "dsh-base at $base does not match ${DSH_VERSION}" >&2; exit 1; }
 
 # DSH keeps profiles and session state under $DSH_HOME, which the runner points
 # at the durable AX volume so /workspace stays the agent's only file surface.
