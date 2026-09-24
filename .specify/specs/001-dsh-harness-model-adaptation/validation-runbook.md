@@ -487,6 +487,18 @@ docker run --rm --entrypoint sh "$DSH_IMAGE" -c 'uname -m'     # → aarch64 en 
 Si vuelves a construir con la **misma** etiqueta, los nodos pueden quedarse con la copia
 cacheada: sube la etiqueta (`:test2`) al repetir.
 
+> **⚠️ Limitación conocida (encontrada en esta validación).** La instalación npm del CLI
+> dentro de una imagen Linux **no arranca**: el loader no resuelve
+> `@deepseek-ai/dsh-sandbox-local` con una instalación global, y con una instalación de
+> proyecto encuentra dos copias idénticas y muere con `Duplicate type name
+> 'DSH_STARTUPINFOW'`. Se probaron npm 10 y 12, `--legacy-peer-deps`, `npm dedupe`,
+> borrar la copia anidada, una imagen con pnpm y la instalación desde el tarball; no hay
+> imagen oficial de DSH que reutilizar. Para el nivel 2, **usa una imagen construida con
+> las herramientas de DeepSeek** (o la que ya te funcione) y apunta `harness.image` a su
+> digest: todo lo demás —el `settings.yaml` que escribe el harness, el contrato de
+> entorno y las rutas de metadata— es independiente de cómo llegó DSH a la imagen. El
+> detalle completo está en `docs/deepseek-harness.md`.
+
 - [ ] Imagen publicada en el registry del clúster, con la arquitectura correcta
 
 ### 3.3 Recursos de prueba
