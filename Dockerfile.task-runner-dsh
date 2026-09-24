@@ -19,6 +19,14 @@ FROM node:22-slim
 # egress and no profile has to be baked into the image.
 ARG DSH_VERSION=0.1.5-rc.2
 
+# The task runner is a cross-compiled Go binary, so the COPY below has to take
+# the build that matches the image platform. BuildKit sets TARGETARCH from
+# --platform (docker build --platform linux/arm64 -> arm64); the default keeps
+# the historical amd64 layout working when it is not set. A mismatch would copy
+# the wrong binary into an otherwise valid image, so make build-task-runner-dsh
+# passes both explicitly.
+ARG TARGETARCH=amd64
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
@@ -34,6 +42,6 @@ RUN npm install -g @deepseek-ai/dsh@${DSH_VERSION}
 # at the durable AX volume so /workspace stays the agent's only file surface.
 ENV DSH_HOME=/ax/dsh
 
-COPY bin/linux_amd64/ax-task-runner /usr/local/bin/ax-task-runner
+COPY bin/linux_${TARGETARCH}/ax-task-runner /usr/local/bin/ax-task-runner
 
 ENTRYPOINT ["/usr/local/bin/ax-task-runner"]
