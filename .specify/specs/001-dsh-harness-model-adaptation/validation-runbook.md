@@ -463,10 +463,15 @@ kubectl get pods -n ax-system
 export DSH_IMAGE="localhost:5001/ax-dsh-runner:test1"   # el registry local del clúster
 
 # El target compila el runner y la imagen para la MISMA arquitectura
-# (TASK_RUNNER_GOARCH, por defecto la del host, que es la de los nodos de kind aquí).
+# (TASK_RUNNER_GOARCH, por defecto la del host, que es la de los nodos de kind aquí)
+# y con el tag que le digas: separa $DSH_IMAGE en repo y tag, o el Makefile
+# publicaría :latest y luego no encontrarías la etiqueta que usas en el manifiesto.
 unset DOCKER_DEFAULT_PLATFORM
 export DOCKER_CONFIG=/tmp/docker-nogcloud      # si el install necesitó esta variable
-make push-task-runner-dsh TASK_RUNNER_GOARCH="${PLATFORM#linux/}" DSH_TASK_RUNNER_REPO="${DSH_IMAGE%:*}"
+make push-task-runner-dsh \
+  TASK_RUNNER_GOARCH="${PLATFORM#linux/}" \
+  DSH_TASK_RUNNER_REPO="${DSH_IMAGE%:*}" \
+  DSH_TASK_RUNNER_TAG="${DSH_IMAGE##*:}"
 ```
 
 `push` publica en el registry local (`localhost:5001`), que es de donde tiran los nodos;
