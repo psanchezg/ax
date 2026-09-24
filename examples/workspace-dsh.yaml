@@ -39,8 +39,11 @@ metadata:
 spec:
   harness:
     kind: deepseek-harness
-    # Replace with your published image (pin a digest in production).
-    image: "ghcr.io/<org>/ax-dsh-runner:1"
+    # Replace with your published image. The digest is required, not cosmetic:
+    # Agent Substrate rejects an actor template whose image is only tagged
+    # ("must be pinned by digest"), because an image change invalidates the
+    # snapshots taken from it.
+    image: "ghcr.io/<org>/ax-dsh-runner@sha256:<digest>"
     modelRef: deepseek
     env:
       - name: DSH_LOG_LEVEL
