@@ -19,7 +19,7 @@ AX_IMAGE_REPO ?= gcr.io/ax-substrate/ate-images
 TASK_RUNNER_REPO ?= $(AX_IMAGE_REPO)/ax-task-runner
 CONTAINER_CLI ?= $(shell which podman 2>/dev/null || which docker 2>/dev/null)
 
-.PHONY: all build build-binaries build-task-runner install push push-task-runner deploy deploy-controller deploy-server deploy-redis apply-example test clean
+.PHONY: all build build-binaries build-task-runner install push push-task-runner deploy deploy-controller deploy-server deploy-redis apply-example test coverage lint-report sonar clean
 
 all: build
 
@@ -91,6 +91,35 @@ apply-example:
 test:
 	@echo "==> Running tests..."
 	go test -v ./...
+
+# Run tests and produce SonarQube-ready reports (coverage.out + test-report.out)
+coverage:
+	@echo "==> Running tests with coverage..."
+	go test ./... -covermode=atomic -coverpkg=./... -coverprofile=coverage.out -json > test-report.out
+	@go tool cover -func=coverage.out | tail -1
+
+# Optional: golangci-lint report (checkstyle format) for SonarQube import
+lint-report:
+	@echo "==> Running golangci-lint..."
+	golangci-lint run --output.checkstyle.path=golangci-lint-report.xml ./...
+
+## --------------------------------------
+## SonarQube
+## --------------------------------------
+# Usage: SONAR_TOKEN=sqp_xxx make sonar
+# Static config lives in sonar-project.properties
+# Note: server is SonarQube 9.9 LTS -> auth param is sonar.login (sonar.token is 10.x+)
+SONAR_HOST ?= http://localhost:9000
+SONAR_ARGS ?=
+
+sonar: coverage
+	@echo "==> Analyzing with SonarQube ($(SONAR_HOST))..."
+	@test -n "$(SONAR_TOKEN)" || { echo "ERROR: SONAR_TOKEN is not set"; exit 1; }
+	sonar-scanner \
+		-Dsonar.host.url=$(SONAR_HOST) \
+		-Dsonar.login=$(SONAR_TOKEN) \
+		-Dsonar.projectVersion=$$(git describe --tags --always --dirty 2>/dev/null || git rev-parse --short HEAD) \
+		$(SONAR_ARGS)
 
 clean:
 	@echo "==> Cleaning build artifacts..."
