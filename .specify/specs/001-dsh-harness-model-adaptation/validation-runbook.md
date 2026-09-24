@@ -462,11 +462,21 @@ kubectl get pods -n ax-system
 ```bash
 export DSH_IMAGE="localhost:5001/ax-dsh-runner:test1"   # el registry local del clúster
 
-# El runner se compila para linux/<arch> del nodo (make build-task-runner hace amd64 fijo).
-GOOS=linux GOARCH="${PLATFORM#linux/}" CGO_ENABLED=0 \
-  go build -trimpath -o bin/linux_${PLATFORM#linux/}/ax-task-runner ./cmd/ax-task-runner
-docker build --platform "$PLATFORM" -f Dockerfile.task-runner-dsh -t "$DSH_IMAGE" .
-docker push "$DSH_IMAGE"               # los nodos ya saben tirar de localhost:5001
+# El target compila el runner y la imagen para la MISMA arquitectura
+# (TASK_RUNNER_GOARCH, por defecto la del host, que es la de los nodos de kind aquí).
+unset DOCKER_DEFAULT_PLATFORM
+export DOCKER_CONFIG=/tmp/docker-nogcloud      # si el install necesitó esta variable
+make push-task-runner-dsh TASK_RUNNER_GOARCH="${PLATFORM#linux/}" DSH_TASK_RUNNER_REPO="${DSH_IMAGE%:*}"
+```
+
+`push` publica en el registry local (`localhost:5001`), que es de donde tiran los nodos;
+`build-task-runner-dsh` solo construye en local.
+
+Comprueba la arquitectura antes de aplicar nada:
+
+```bash
+docker image inspect "$DSH_IMAGE" --format 'imagen: {{.Architecture}}/{{.Os}}'
+docker run --rm --entrypoint sh "$DSH_IMAGE" -c 'uname -m'     # → aarch64 en Apple Silicon
 ```
 
 Si vuelves a construir con la **misma** etiqueta, los nodos pueden quedarse con la copia
