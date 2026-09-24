@@ -254,6 +254,11 @@ message ModelSpec {
   // parameters are provider-specific generation settings passed through to the
   // model API as-is, for example temperature or maxOutputTokens for Gemini.
   google.protobuf.Struct parameters = 7;
+  // base_url is the provider endpoint base (scheme, host, optional port and
+  // path prefix such as /v1) used instead of the provider default, so
+  // self-hosted and gateway endpoints are declarable. json_name keeps the
+  // `baseURL` spelling in YAML and JSON.
+  string base_url = 8 [json_name = "baseURL"];
 }
 
 message SecretKeyRef {
