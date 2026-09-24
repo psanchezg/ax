@@ -173,7 +173,9 @@ provider sin adaptador DSH (`google`/`openai`/`anthropic` son los válidos).
 - [X] `settings.yaml` generado como arriba
 - [X] El comando de la tarea se ejecutó
 
-### 1.4 El único supuesto externo: el `dsh` real entiende ese `settings.yaml`
+### 1.4 El único supuesto externo: el `dsh` real usa *tu* binding
+
+#### 1.4a Con tu clave real (prueba de extremo a extremo)
 
 Fuera de un clúster nadie inyecta la credencial, así que **exporta tú la variable que
 declara el `Model`** (`secretKey.key`) antes de lanzar DSH:
@@ -187,37 +189,87 @@ DSH_HOME=/tmp/ax-runbook/dsh DSH_PERMISSION_MODE=danger-full-access \
 Esperado: DSH arranca, resuelve la credencial por `apiKeyEnv`, llama al `baseURL` del
 `Model` y termina con una respuesta en stdout.
 
-**Cómo probar que de verdad usa *tu* ruta** (sin clave real y sin gastar cuota): apunta el
-`Model` a un servidor local tuyo y comprueba si DSH llama ahí.
+> Ojo con la interpretación: si tu `Model` apunta a `api.deepseek.com`, un 401 **no**
+> distingue tu ruta de la interna de DSH, porque ambas usan ese host por defecto. Prueba
+> lo que prueba: que la credencial llega, el endpoint responde y el error se propaga sin
+> fabricar nada. Para la ruta, usa 1.4b.
+
+#### 1.4b Sin clave: comprobar que DSH llama al `baseURL` del `Model`
+
+Este es el test que sí discrimina. Sustituye el endpoint por uno local tuyo y mira si DSH
+llama ahí:
 
 ```bash
-# En una terminal: un endpoint falso que registra lo que recibe
-python3 -c "
+W=/tmp/ax-runbook
+
+# 1) Un endpoint falso que registra lo que recibe y devuelve 401.
+cat > "$W/fake.py" <<'EOF'
 import http.server
 class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
-        n=int(self.headers.get('Content-Length') or 0); b=self.rfile.read(n)
-        print('REQ', self.path, self.headers.get('Authorization'), b[:80], flush=True)
-        self.send_response(401); self.end_headers(); self.wfile.write(b'{\"error\":\"fake\"}')
-    def log_message(self,*a): pass
-http.server.HTTPServer(('127.0.0.1',18999),H).serve_forever()" &
+        n = int(self.headers.get('Content-Length') or 0)
+        b = self.rfile.read(n)
+        print("REQ", self.path, "auth=" + str(self.headers.get('Authorization')), b[:80], flush=True)
+        self.send_response(401); self.end_headers()
+        self.wfile.write(b'{"error":{"message":"fake server reached"}}')
+    def log_message(self, *a): pass
+http.server.HTTPServer(('127.0.0.1', 18999), H).serve_forever()
+EOF
+python3 "$W/fake.py" > "$W/fake.log" 2>&1 &
+FAKE=$!
+sleep 1
+head -3 "$W/fake.log"          # debe estar vacío; si dice "Address already in use", otro proceso tiene el 18999
+# Si el puerto está ocupado, cambia el 18999 por otro (18998) aquí y en el baseURL de abajo.
 
-# En el model.yaml, cambia baseURL por http://127.0.0.1:18999/v1 y regenera settings.yaml
-# (vuelve a ejecutar §1.3), luego:
-DSH_HOME=/tmp/ax-runbook/dsh DEEPSEEK_API_KEY=dummy \
-  dsh --profile headless "di hola"
+# 2) Apunta el Model al stub y regenera settings.yaml con el runner de verdad.
+sed -i '' 's|https://api.deepseek.com/v1|http://127.0.0.1:18999/v1|' "$W/model.yaml"
+grep baseURL "$W/model.yaml"                      # → http://127.0.0.1:18999/v1
+rm -rf "$W/dsh"; mkdir -p "$W/dsh"
+DSH_HOME="$W/dsh" AX_MODEL_YAML="$(cat "$W/model.yaml")" \
+  "$W/ax-task-runner" --task-file "$W/task.yaml" --workspace-file "$W/ws.yaml" --port 18099 \
+  > "$W/runner.log" 2>&1 &
+RUNNER=$!
+sleep 2; kill $RUNNER 2>/dev/null || true          # el runner ya escribió settings.yaml
+grep -A2 agent-default-model "$W/dsh/settings.yaml"
+
+# 3) Lanza DSH con una clave dummy y mira quién recibe la petición.
+DSH_HOME="$W/dsh" DEEPSEEK_API_KEY=dummy-key \
+  dsh --profile headless "di hola" > "$W/dsh.log" 2>&1 &
+DSH=$!
+for i in $(seq 1 12); do sleep 5; grep -q "REQ" "$W/fake.log" 2>/dev/null && break; done
+kill $DSH 2>/dev/null || true
+
+echo "== peticiones recibidas por el stub =="; cat "$W/fake.log"
+echo "== salida de dsh =="; head -3 "$W/dsh.log"
+kill $FAKE 2>/dev/null || true
 ```
 
-Esperado: el servidor falso imprime `REQ /v1/chat/completions auth=Bearer dummy ...` y el
-error de DSH viene de *ese* endpoint. Si el servidor no recibe nada y aparece
-`MISSING_CREDENTIAL ... llm-deepseek: no API key for provider route "deepseek-official"`,
-DSH está usando su ruta interna en vez de la del `Model`: comprueba que `settings.yaml`
-tiene la sección `agent-default-model` apuntando a la ruta de `llm-pi-ai`.
+Esperado:
+
+```text
+== peticiones recibidas por el stub ==
+REQ /v1/chat/completions auth=Bearer dummy-key b'{"model":"deepseek-chat","messages":[{"role":"system",...
+== salida de dsh ==
+dsh: AUTH: 401: {"message":"fake server reached"}
+```
+
+El error viene de **tu** endpoint, no de DeepSeek: eso prueba que la ruta del `Model` está
+seleccionada. Si el stub no recibe nada y ves
+`MISSING_CREDENTIAL ... llm-deepseek: ... route "deepseek-official"`, DSH está usando su
+ruta interna: comprueba que `settings.yaml` incluye la sección `agent-default-model`
+apuntando a la ruta de `llm-pi-ai` (y que regeneraste con el runner actual).
+
+Recuerda revertir el `baseURL` del `model.yaml` después:
+
+```bash
+sed -i '' 's|http://127.0.0.1:18999/v1|https://api.deepseek.com/v1|' "$W/model.yaml"
+```
 
 Si falla: `MISSING_CREDENTIAL` para **tu** ruta → no exportaste la variable del `Model`;
 error HTTP del proveedor → la clave o el `baseURL`; timeout → endpoint/egress de tu red.
 
-- [ ] DSH llama al `baseURL` del `Model` (no a su ruta interna)
+- [ ] 1.4a: DSH responde con una clave real
+- [ ] 1.4b: el stub local recibe la petición (la ruta del `Model` está seleccionada)
 
 ---
 
