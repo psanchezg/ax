@@ -60,6 +60,10 @@ type Config struct {
 	// Workspaces are the Workspace resources the task binds. Each is matched to
 	// an entry of the task's spec.workspaces by name.
 	Workspaces []*v1alpha1.Workspace
+	// Model is the Model resource the task is bound to, when there is one. It is
+	// discovered by harnesses through the metadata server and is what carries
+	// the provider endpoint, model id, and secret reference.
+	Model *v1alpha1.Model
 	// OnCommandExit, when set, is called once the task command has exited.
 	OnCommandExit func(CommandExit)
 }
@@ -144,6 +148,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 
 	metaServer := metadata.NewServer(port, cfg.Task, workspaces, metadata.ServerOptions{WorkspacePath: wsPath})
+	metaServer.SetModel(cfg.Model)
 	if err := metaServer.Start(); err != nil {
 		return fmt.Errorf("starting metadata server: %w", err)
 	}

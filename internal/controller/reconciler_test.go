@@ -16,8 +16,10 @@ package controller_test
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,6 +43,18 @@ type mockControlServer struct {
 	deletedActors    []string
 	actorTemplates   map[string]bool
 	deletedTemplates []string
+	// templateEnvs records the container environment of every created
+	// ActorTemplate, which is how the task container contract is asserted.
+	templateEnvs []map[string]string
+}
+
+// latestTemplateEnv returns the environment of the most recently created
+// ActorTemplate, or nil when none was created.
+func (m *mockControlServer) latestTemplateEnv() map[string]string {
+	if len(m.templateEnvs) == 0 {
+		return nil
+	}
+	return m.templateEnvs[len(m.templateEnvs)-1]
 }
 
 // noSecrets is a SecretResolver for tests: it never finds a key and never touches a cluster.
@@ -54,15 +68,6 @@ func (m *mockControlServer) GetActorTemplate(_ context.Context, req *ateapipb.Ge
 		return nil, status.Error(codes.NotFound, "template not found")
 	}
 	return &ateapipb.ActorTemplate{Metadata: &ateapipb.ResourceMetadata{Name: ref.GetName(), Atespace: ref.GetAtespace()}}, nil
-}
-
-func (m *mockControlServer) CreateActorTemplate(_ context.Context, req *ateapipb.CreateActorTemplateRequest) (*ateapipb.ActorTemplate, error) {
-	if m.actorTemplates == nil {
-		m.actorTemplates = make(map[string]bool)
-	}
-	tmpl := req.GetActorTemplate()
-	m.actorTemplates[tmpl.GetMetadata().GetName()] = true
-	return tmpl, nil
 }
 
 func (m *mockControlServer) CreateAtespace(ctx context.Context, req *ateapipb.CreateAtespaceRequest) (*ateapipb.Atespace, error) {
@@ -144,6 +149,24 @@ func (m *mockControlServer) DeleteActorTemplate(ctx context.Context, req *ateapi
 	delete(m.actorTemplates, name)
 	m.deletedTemplates = append(m.deletedTemplates, name)
 	return &ateapipb.ActorTemplate{Metadata: &ateapipb.ResourceMetadata{Name: name}}, nil
+}
+
+func (m *mockControlServer) CreateActorTemplate(ctx context.Context, req *ateapipb.CreateActorTemplateRequest) (*ateapipb.ActorTemplate, error) {
+	tmpl := req.GetActorTemplate()
+	if name := tmpl.GetMetadata().GetName(); name != "" {
+		if m.actorTemplates == nil {
+			m.actorTemplates = map[string]bool{}
+		}
+		m.actorTemplates[name] = true
+	}
+	env := map[string]string{}
+	for _, container := range tmpl.GetContainers() {
+		for _, e := range container.GetEnv() {
+			env[e.GetName()] = e.GetValue()
+		}
+	}
+	m.templateEnvs = append(m.templateEnvs, env)
+	return tmpl, nil
 }
 
 func TestTaskReconciler(t *testing.T) {
@@ -456,4 +479,228 @@ func TestReconcileDelete_RemovesActorAndTemplates(t *testing.T) {
 			t.Errorf("template %s should not have been deleted", keep)
 		}
 	}
+}
+
+// startMockSubstrate starts an in-process Substrate mock and returns it with a client.
+func startMockSubstrate(t *testing.T) (*mockControlServer, *substrate.Client) {
+	t.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	mockSrv := &mockControlServer{}
+	grpcServer := grpc.NewServer()
+	ateapipb.RegisterControlServer(grpcServer, mockSrv)
+	go func() { _ = grpcServer.Serve(lis) }()
+	t.Cleanup(func() {
+		grpcServer.Stop()
+		lis.Close()
+	})
+
+	client, err := substrate.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to create substrate client: %v", err)
+	}
+	t.Cleanup(func() { client.Close() })
+	return mockSrv, client
+}
+
+// modelBoundTask returns a task whose single workspace references modelRef.
+func modelBoundTask(modelRef string) (*v1alpha1.Task, *v1alpha1.Workspace) {
+	task := &v1alpha1.Task{
+		ApiVersion: v1alpha1.APIVersion,
+		Kind:       v1alpha1.KindTask,
+		Metadata:   &v1alpha1.ObjectMeta{Name: "dsh-task", Atespace: "default"},
+		Spec: &v1alpha1.TaskSpec{
+			Image:   "ghcr.io/org/ax-dsh-runner:1",
+			Command: []string{"dsh", "--profile", "ax-headless", "do the thing"},
+		},
+	}
+	ws := &v1alpha1.Workspace{
+		ApiVersion: v1alpha1.APIVersion,
+		Kind:       v1alpha1.KindWorkspace,
+		Metadata:   &v1alpha1.ObjectMeta{Name: "dsh-ws", Atespace: "default"},
+		Spec:       &v1alpha1.WorkspaceSpec{},
+	}
+	if modelRef != "" {
+		ws.Spec.Harness = &v1alpha1.AgentHarness{Kind: "deepseek-harness", ModelRef: modelRef}
+	}
+	return task, ws
+}
+
+func testModel() *v1alpha1.Model {
+	return &v1alpha1.Model{
+		ApiVersion: v1alpha1.APIVersion,
+		Kind:       v1alpha1.KindModel,
+		Metadata:   &v1alpha1.ObjectMeta{Name: "deepseek", Atespace: "default"},
+		Spec: &v1alpha1.ModelSpec{
+			Provider:  "openai",
+			Model:     "deepseek-chat",
+			BaseUrl:   "https://api.deepseek.com/v1",
+			SecretKey: &v1alpha1.SecretKeyRef{Name: "deepseek-api-secret", Key: "DEEPSEEK_API_KEY"},
+		},
+	}
+}
+
+// TestReconcile_ModelDerivedCredential covers the Model-derived container
+// contract: the credential is injected under the model-declared name, plus the
+// endpoint and the Model itself, and the legacy Gemini literal is left out.
+func TestReconcile_ModelDerivedCredential(t *testing.T) {
+	ctx := context.Background()
+	mockSrv, client := startMockSubstrate(t)
+
+	reconciler := controller.NewTaskReconciler(client, "test-template", "ax-system")
+	reconciler.WorkspaceReadyTimeout = 200 * time.Millisecond
+	reconciler.ModelResolver = func(ctx context.Context, atespace, name string) (*v1alpha1.Model, error) {
+		if atespace != "default" || name != "deepseek" {
+			t.Errorf("unexpected model lookup %s/%s", atespace, name)
+		}
+		return testModel(), nil
+	}
+	var secretNames []string
+	reconciler.SecretResolver = func(ctx context.Context, namespace, secretName, key string) (string, error) {
+		secretNames = append(secretNames, namespace+"/"+secretName+"/"+key)
+		if secretName != "deepseek-api-secret" || key != "DEEPSEEK_API_KEY" {
+			t.Errorf("unexpected secret lookup %s/%s/%s", namespace, secretName, key)
+		}
+		return "sk-test-value", nil
+	}
+
+	task, ws := modelBoundTask("deepseek")
+	if _, err := reconciler.Reconcile(ctx, task, ws); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	env := mockSrv.latestTemplateEnv()
+	if env == nil {
+		t.Fatal("expected an ActorTemplate to be created")
+	}
+	if env["DEEPSEEK_API_KEY"] != "sk-test-value" {
+		t.Errorf("expected the credential under the model-declared name, got %q", env["DEEPSEEK_API_KEY"])
+	}
+	if env["AX_MODEL_BASE_URL"] != "https://api.deepseek.com/v1" {
+		t.Errorf("expected AX_MODEL_BASE_URL, got %q", env["AX_MODEL_BASE_URL"])
+	}
+	if !strings.Contains(env["AX_MODEL_YAML"], "name: deepseek") {
+		t.Errorf("expected AX_MODEL_YAML to carry the Model, got %q", env["AX_MODEL_YAML"])
+	}
+	if strings.Contains(env["AX_MODEL_YAML"], "sk-test-value") {
+		t.Errorf("AX_MODEL_YAML must carry the secret reference, never the value: %q", env["AX_MODEL_YAML"])
+	}
+	if _, leaked := env["GEMINI_API_KEY"]; leaked {
+		t.Error("expected no GEMINI_API_KEY when a Model is bound")
+	}
+	if len(secretNames) != 1 {
+		t.Errorf("expected exactly one secret lookup, got %v", secretNames)
+	}
+}
+
+// TestReconcile_LegacyCredentialPath keeps the pre-Model behavior byte-for-byte:
+// with no model reference, the Gemini secret is injected as before.
+func TestReconcile_LegacyCredentialPath(t *testing.T) {
+	ctx := context.Background()
+	mockSrv, client := startMockSubstrate(t)
+
+	reconciler := controller.NewTaskReconciler(client, "test-template", "ax-system")
+	reconciler.WorkspaceReadyTimeout = 200 * time.Millisecond
+	modelLookups := 0
+	reconciler.ModelResolver = func(context.Context, string, string) (*v1alpha1.Model, error) {
+		modelLookups++
+		return testModel(), nil
+	}
+	reconciler.SecretResolver = func(ctx context.Context, namespace, secretName, key string) (string, error) {
+		if secretName != "gemini-api-secret" || key != "GEMINI_API_KEY" {
+			t.Errorf("unexpected secret lookup %s/%s", secretName, key)
+		}
+		return "legacy-key", nil
+	}
+
+	task, ws := modelBoundTask("")
+	if _, err := reconciler.Reconcile(ctx, task, ws); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	env := mockSrv.latestTemplateEnv()
+	if env == nil {
+		t.Fatal("expected an ActorTemplate to be created")
+	}
+	if env["GEMINI_API_KEY"] != "legacy-key" {
+		t.Errorf("expected the legacy Gemini credential, got %q", env["GEMINI_API_KEY"])
+	}
+	for _, key := range []string{"AX_MODEL_YAML", "AX_MODEL_BASE_URL"} {
+		if _, present := env[key]; present {
+			t.Errorf("expected no %s without a model reference", key)
+		}
+	}
+	if modelLookups != 0 {
+		t.Errorf("expected no model lookup without a reference, got %d", modelLookups)
+	}
+}
+
+// TestReconcile_UnresolvedModelRef fails closed: a reference that cannot be
+// resolved must not silently fall back to the legacy credential.
+func TestReconcile_UnresolvedModelRef(t *testing.T) {
+	ctx := context.Background()
+	mockSrv, client := startMockSubstrate(t)
+
+	reconciler := controller.NewTaskReconciler(client, "test-template", "ax-system")
+	reconciler.WorkspaceReadyTimeout = 200 * time.Millisecond
+	reconciler.ModelResolver = func(context.Context, string, string) (*v1alpha1.Model, error) {
+		return nil, errors.New("model not found")
+	}
+	reconciler.SecretResolver = func(context.Context, string, string, string) (string, error) {
+		return "legacy-key", nil
+	}
+
+	task, ws := modelBoundTask("missing")
+	reconciled, err := reconciler.Reconcile(ctx, task, ws)
+	if err == nil {
+		t.Fatal("expected an error for an unresolvable model reference")
+	}
+	if reconciled.Status.Phase != "Failed" {
+		t.Errorf("expected phase Failed, got %q", reconciled.Status.Phase)
+	}
+	if reason := conditionReason(reconciled, "Ready"); reason != "UnresolvedModelRef" {
+		t.Errorf("expected condition reason UnresolvedModelRef, got %q", reason)
+	}
+	if len(mockSrv.templateEnvs) != 0 {
+		t.Errorf("expected no container environment to be provisioned, got %v", mockSrv.templateEnvs)
+	}
+}
+
+// TestReconcile_UnresolvedModelSecret fails closed with no partial injection.
+func TestReconcile_UnresolvedModelSecret(t *testing.T) {
+	ctx := context.Background()
+	mockSrv, client := startMockSubstrate(t)
+
+	reconciler := controller.NewTaskReconciler(client, "test-template", "ax-system")
+	reconciler.WorkspaceReadyTimeout = 200 * time.Millisecond
+	reconciler.ModelResolver = func(context.Context, string, string) (*v1alpha1.Model, error) {
+		return testModel(), nil
+	}
+	reconciler.SecretResolver = func(context.Context, string, string, string) (string, error) {
+		return "", errors.New("secret not found")
+	}
+
+	task, ws := modelBoundTask("deepseek")
+	reconciled, err := reconciler.Reconcile(ctx, task, ws)
+	if err == nil {
+		t.Fatal("expected an error for an unresolvable secret")
+	}
+	if reason := conditionReason(reconciled, "Ready"); reason != "UnresolvedModelCredential" {
+		t.Errorf("expected condition reason UnresolvedModelCredential, got %q", reason)
+	}
+	if len(mockSrv.templateEnvs) != 0 {
+		t.Errorf("expected no partial injection, got %v", mockSrv.templateEnvs)
+	}
+}
+
+// conditionReason returns the reason of the named condition, or "".
+func conditionReason(task *v1alpha1.Task, condType string) string {
+	for _, c := range task.GetStatus().GetConditions() {
+		if c.GetType() == condType {
+			return c.GetReason()
+		}
+	}
+	return ""
 }

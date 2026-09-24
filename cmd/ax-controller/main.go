@@ -103,6 +103,8 @@ func main() {
 	defer rClient.Close()
 
 	rStore := redis.NewStore(rClient, redis.Options{})
+	// Tasks bound to a Model resolve its credential and endpoint through the store.
+	reconciler.ModelResolver = controller.StoreModelResolver(rStore)
 	worker := controller.NewWorker(rStore, reconciler, redisGroup, redisConsumer)
 	if err := worker.Run(ctx); err != nil && err != context.Canceled {
 		slog.Error("redis worker stopped with error", "error", err)
