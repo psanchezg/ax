@@ -1,0 +1,67 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Phase 0: run DeepSeek Harness inside an AX sandbox without changing AX.
+#
+# This manifest needs no code change at all. AX already runs any command in a
+# sandboxed container (spec.command), and the DSH runner image carries both the
+# runner and the `dsh` CLI. The workspace intentionally declares no `goal`: a
+# goal would also trigger the Antigravity bootstrap, and this recipe is meant to
+# prove the DSH path on its own.
+#
+# Build and publish the image first (see docs/dsh-phase-0.md), then:
+#
+#   ax apply -f examples/task-dsh-demo.yaml
+#   ax get task dsh-demo
+#   ax ssh dsh-demo -- ps aux | grep dsh
+#
+# Phase 0 limitation: task env is plain name/value, so the provider key is
+# injected here literally. Phase 2 replaces it with a Model-derived secret —
+# never commit a real key.
+---
+apiVersion: ax.io/v1alpha1
+kind: Workspace
+metadata:
+  name: dsh-demo-ws
+  atespace: default
+spec:
+  # No `goal` on purpose: DSH gets its instructions from spec.command below.
+  git:
+    - name: origin
+      repo: "https://github.com/octocat/Hello-World.git"
+      branch: "master"
+      depth: 1
+---
+apiVersion: ax.io/v1alpha1
+kind: Task
+metadata:
+  name: dsh-demo
+  atespace: default
+spec:
+  # Replace with your published DSH runner image (pin a digest).
+  image: "ghcr.io/<org>/ax-dsh-runner@sha256:<digest>"
+  command:
+    - "dsh"
+    - "--profile"
+    - "headless"
+    - "Describe this repository and report what you found."
+  env:
+    - name: DEEPSEEK_API_KEY
+      value: "<your-deepseek-api-key>"
+    - name: DEEPSEEK_BASE_URL
+      value: "https://api.deepseek.com"
+  workspaces:
+    - name: dsh-demo-ws
+      path: /workspace
+  debug: true # serve guest services so `ax ssh` works; off by default
