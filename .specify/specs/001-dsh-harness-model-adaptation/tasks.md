@@ -155,10 +155,10 @@ Repository layout per [plan.md](./plan.md) Project Structure: Go monorepo — `p
 
 ### Implementation for User Story 5
 
-- [ ] T044 [P] [US5] Update `DESIGN.md` with exactly the four additions (FR-022): the fifth component row for the agent-harness contract ("A replaceable, declaratively selected program that turns a workspace goal into a prepared workspace and a running agent…"), the `Model` data-path statement (control plane resolves credentials and injects them; harnesses read the binding at runtime), the provider-registry note (identifiers validated against a registry — a new provider is an adapter, not a schema change), and the single-isolation-boundary invariant (**Agent Substrate is the only isolation boundary**)
-- [ ] T045 [P] [US5] Create `docs/deepseek-harness.md` (FR-023): image build, profile pre-provisioning, environment contract, isolation decision, plus known limitations — `dsh-tool-ask-user` preset policy (R1) and `DSH_HOME` session-state growth with no retention policy (R2)
-- [ ] T046 [P] [US5] Validate `examples/` against the code they describe (Constitution IV: docs and examples compile/validate) in `examples/`
-- [ ] T047 [US5] Cross-document truthfulness pass: every claim in `DESIGN.md`, `docs/runner.md`, `docs/manifests.md`, `docs/deepseek-harness.md`, `docs/dsh-phase-0.md`, and `docs/concepts.md` (key-rotation claim now true after US3) exercises as written; fix drift in place (depends: T044–T046)
+- [X] T044 [P] [US5] Update `DESIGN.md` with exactly the four additions (FR-022): the fifth component row for the agent-harness contract ("A replaceable, declaratively selected program that turns a workspace goal into a prepared workspace and a running agent…"), the `Model` data-path statement (control plane resolves credentials and injects them; harnesses read the binding at runtime), the provider-registry note (identifiers validated against a registry — a new provider is an adapter, not a schema change), and the single-isolation-boundary invariant (**Agent Substrate is the only isolation boundary**)
+- [X] T045 [P] [US5] Create `docs/deepseek-harness.md` (FR-023): image build, profile pre-provisioning, environment contract, isolation decision, plus known limitations — `dsh-tool-ask-user` preset policy (R1) and `DSH_HOME` session-state growth with no retention policy (R2)
+- [X] T046 [P] [US5] Validate `examples/` against the code they describe (Constitution IV: docs and examples compile/validate) in `examples/`
+- [X] T047 [US5] Cross-document truthfulness pass: every claim in `DESIGN.md`, `docs/runner.md`, `docs/manifests.md`, `docs/deepseek-harness.md`, `docs/dsh-phase-0.md`, and `docs/concepts.md` (key-rotation claim now true after US3) exercises as written; fix drift in place (depends: T044–T046)
 
 **Checkpoint**: All five success stories complete; docs match reality
 
@@ -168,11 +168,11 @@ Repository layout per [plan.md](./plan.md) Project Structure: Go monorepo — `p
 
 **Purpose**: Whole-feature verification, security pass, and export rehearsal
 
-- [ ] T048 [P] Execute quickstart.md §1–§5 end to end and record results in `specs/001-dsh-harness-model-adaptation/quickstart.md`
-- [ ] T049 Verify every Success Criterion SC-001…SC-009 in `specs/001-dsh-harness-model-adaptation/spec.md` against evidence (add pointers to the tests/scenarios that prove each)
-- [ ] T050 Security pass per Constitution Security constraints: no real secrets/keys/URLs anywhere in `docs/`, `examples/`, tests, or history (placeholders only); deny-by-default egress documented; no workflow/permission changes smuggled in
+- [X] T048 [P] Execute quickstart.md §1–§5 end to end and record results in `specs/001-dsh-harness-model-adaptation/quickstart.md`
+- [X] T049 Verify every Success Criterion SC-001…SC-009 in `specs/001-dsh-harness-model-adaptation/spec.md` against evidence (add pointers to the tests/scenarios that prove each)
+- [X] T050 Security pass per Constitution Security constraints: no real secrets/keys/URLs anywhere in `docs/`, `examples/`, tests, or history (placeholders only); deny-by-default egress documented; no workflow/permission changes smuggled in
 - [ ] T051 Verify commit slicing per research.md R16 in `git log`: atomic Conventional Commits, the two `feat(api):` proto commits isolated, fork-local artifacts absent; run the cherry-pick test per seam: `git format-patch upstream/main..<seam-branch>` applies cleanly on a fresh `upstream/main` and builds + passes `make test` there
-- [ ] T052 Final quality gate (Constitution verification gate): `make test`, `make build`, `go mod tidy` + `git diff --exit-code go.mod go.sum`, `gofmt -l .`, `go vet ./...`
+- [X] T052 Final quality gate (Constitution verification gate): `make test`, `make build`, `go mod tidy` + `git diff --exit-code go.mod go.sum`, `gofmt -l .`, `go vet ./...`
 
 ---
 

@@ -150,3 +150,35 @@ git format-patch upstream/main..<seam-branch>   # applies cleanly on fresh upstr
 
 Expected: green suite, three binaries (`bin/ax`, `bin/ax-server`, `bin/ax-controller` +
 runner), clean diffs, patches applying cleanly.
+
+## 7. Validation log (implementation run)
+
+Everything below was executed on 2026-09-24 in the development environment. Cluster
+scenarios are marked as not executed there, so the record is honest about the gap
+between "the code is verified" and "a cluster was exercised".
+
+| Check | How | Result |
+|---|---|---|
+| Unit, contract, and integration suite | `make test` | PASS, all packages |
+| Formatting, vet, module tidiness, build | `gofmt -l .`, `go vet ./...`, `go mod tidy` + clean `go.mod`/`go.sum` diff, `make build` | clean; three binaries |
+| Examples stay decodable and valid | `go test ./pkg/apis/... -run TestExamples` | PASS, all 5 manifests and both documents of `task-dsh-demo.yaml` |
+| Apply-time provider rejection | `internal/server` tests (`TestUpdateModel_ValidatesProvider`) | PASS: typo'd provider rejected naming the valid values |
+| No fabricated completions | `internal/model` tests (fallback regression, per-adapter 4xx/5xx) | PASS: every failure is a `*ProviderError` |
+| Local runner end to end | `ax-task-runner --task-file … --workspace-file … --model-file …` (or `AX_MODEL_YAML`), DSH harness, port 18099 | PASS: `/readyz` = `ok`; `/metadata/v1alpha1/ax/model` serves the `Model` with the secret **reference**; `$DSH_HOME/settings.yaml` contains the `llm-pi-ai` provider binding; the task command ran |
+| Antigravity path unchanged | existing `internal/workspace` and `runner` tests, unmodified | PASS (SC-009) |
+| Export rehearsal | `git format-patch` of the upstream-bound commits, then `git am` on a fresh `upstream/main` worktree | **FINDING**: 8 of 14 patches applied cleanly; the controller patch conflicts in `docs/runner.md` because upstream advanced by one commit (`e6211f8`) after the fork point — the fork must be rebased onto `upstream/main` before export |
+
+### Success criteria evidence
+
+| SC | Evidence | Status |
+|---|---|---|
+| SC-001 | Local runner E2E above (DSH harness bound to an `openai` provider `Model` ran the goal-driven command path); full `ax apply` → completed goal needs a cluster | Partial (local) |
+| SC-002 | `TestClient_NoFallbackWithoutOptIn`, `TestGoogle_ErrorsAreTyped`, `TestOpenAI_TypedErrors`, `TestAnthropic_TypedErrors` | PASS |
+| SC-003 | `TestUpdateModel_ValidatesProvider` | PASS |
+| SC-004 | `TestReconcile_ModelDerivedCredential` (secret resolved per provisioning; no code or manifest change) | PASS (unit); cluster rotation not executed |
+| SC-005 | Existing suites pass unmodified; `TestReconcile_LegacyCredentialPath`; `TestModel_BaseURL_*`; harness default tests | PASS |
+| SC-006 | `TestWire_RoundTrip_PreservesUnknownFields`, dual-spelling decode tests, preserved typo rejection | PASS |
+| SC-007 | `TestRun_DSHHarnessKeepsStateOutOfWorkpace` (state on the AX volume, `/workspace` the only file surface, isolation delegated to Substrate); the sandbox refusal itself is Substrate's and needs a cluster | Partial |
+| SC-008 | DSH image runs the shipped `headless` profile, which initializes from the installed package's templates — no registry access is involved; npm-blocked boot needs a cluster | Partial (by construction) |
+| SC-009 | `internal/workspace` bootstrap tests and `runner` tests unchanged; `Dockerfile.task-runner` untouched | PASS |
+
