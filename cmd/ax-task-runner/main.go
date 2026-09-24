@@ -47,12 +47,14 @@ func (l *stringList) Set(v string) error { *l = append(*l, v); return nil }
 
 func main() {
 	var (
-		cfg      runner.Config
-		taskFile string
-		wsFiles  stringList
+		cfg       runner.Config
+		taskFile  string
+		modelFile string
+		wsFiles   stringList
 	)
 	flag.IntVar(&cfg.Port, "port", runner.DefaultPort, "Port for the metadata and guest server")
 	flag.StringVar(&taskFile, "task-file", "", "Read the Task YAML from this file instead of AX_TASK_YAML")
+	flag.StringVar(&modelFile, "model-file", "", "Read the Model YAML from this file instead of AX_MODEL_YAML")
 	flag.Var(&wsFiles, "workspace-file", "Read Workspace YAML from this file instead of the environment; repeatable, and each file may hold several documents")
 	flag.Parse()
 
@@ -64,6 +66,15 @@ func main() {
 		fatal(err)
 	} else if task.GetMetadata() != nil {
 		cfg.Task = &task
+	}
+
+	// The bound Model carries the provider endpoint, model id, and the reference
+	// to the credential secret; harnesses read it through the metadata server.
+	var boundModel v1alpha1.Model
+	if err := loadSpec(modelFile, "AX_MODEL_YAML", &boundModel); err != nil {
+		fatal(err)
+	} else if boundModel.GetMetadata() != nil {
+		cfg.Model = &boundModel
 	}
 
 	workspaces, err := loadWorkspaces(wsFiles)

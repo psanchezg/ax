@@ -40,6 +40,7 @@ type Server struct {
 	mu             sync.RWMutex
 	task           *v1alpha1.Task
 	workspaces     []*v1alpha1.Workspace
+	model          *v1alpha1.Model
 	workspaceReady bool
 }
 
@@ -96,8 +97,10 @@ func NewServer(port int, task *v1alpha1.Task, workspaces []*v1alpha1.Workspace, 
 	// Metadata endpoints:
 	// /metadata/v1alpha1/ax/task        the Task
 	// /metadata/v1alpha1/ax/workspaces  every bound Workspace, as a YAML stream
+	// /metadata/v1alpha1/ax/model       the bound Model, when there is one
 	mux.HandleFunc("/metadata/v1alpha1/ax/task", s.handleTask)
 	mux.HandleFunc("/metadata/v1alpha1/ax/workspaces", s.handleWorkspaces)
+	mux.HandleFunc("/metadata/v1alpha1/ax/model", s.handleModel)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.grpcServer != nil && r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
@@ -150,6 +153,15 @@ func (s *Server) UpdateState(task *v1alpha1.Task, workspaces []*v1alpha1.Workspa
 	defer s.mu.Unlock()
 	s.task = task
 	s.workspaces = compactWorkspaces(workspaces)
+}
+
+// SetModel updates the Model resource the task is bound to, served at
+// /metadata/v1alpha1/ax/model. It carries the secretKey reference, never a
+// secret value.
+func (s *Server) SetModel(m *v1alpha1.Model) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.model = m
 }
 
 // compactWorkspaces returns a copy of workspaces without nil entries.
@@ -208,6 +220,25 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/yaml")
 	if err := yaml.NewEncoder(w).Encode(task); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// handleModel serves the bound Model resource, or 404 when the task has no
+// model binding. Secret values are never included: the Model carries only the
+// reference to the Kubernetes secret.
+func (s *Server) handleModel(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	m := s.model
+	s.mu.RUnlock()
+
+	if m == nil {
+		http.Error(w, "model metadata not available", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/yaml")
+	if err := yaml.NewEncoder(w).Encode(m); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }

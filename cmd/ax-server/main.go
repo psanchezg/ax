@@ -102,7 +102,10 @@ func main() {
 		slog.Warn("could not initialize substrate client; running without substrate reconciliation", "error", err)
 	} else {
 		defer subClient.Close()
-		reconciler = controller.NewTaskReconciler(subClient, defaultTemplate, defaultTemplateAtespace)
+		taskReconciler := controller.NewTaskReconciler(subClient, defaultTemplate, defaultTemplateAtespace)
+		// Tasks bound to a Model resolve its credential and endpoint through the store.
+		taskReconciler.ModelResolver = controller.StoreModelResolver(rStore)
+		reconciler = taskReconciler
 	}
 
 	srv := server.NewServer(rStore, server.Options{

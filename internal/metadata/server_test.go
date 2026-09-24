@@ -18,6 +18,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -200,5 +201,63 @@ func TestMetadataServer_GuestServicesRequireDebug(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected StartProcess to fail when spec.debug is false")
+	}
+}
+
+// TestMetadataServer_Model covers the model binding route: absent until a Model
+// is bound, and it exposes the secret reference but never a secret value.
+func TestMetadataServer_Model(t *testing.T) {
+	task := &v1alpha1.Task{
+		Metadata: &v1alpha1.ObjectMeta{Name: "model-task", Atespace: "default"},
+		Spec:     &v1alpha1.TaskSpec{Image: "ghcr.io/test/img"},
+	}
+
+	srv := metadata.NewServer(9997, task, nil)
+	if err := srv.Start(); err != nil {
+		t.Fatalf("failed to start server: %v", err)
+	}
+	defer srv.Stop(context.Background())
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get("http://127.0.0.1:9997/metadata/v1alpha1/ax/model")
+	if err != nil {
+		t.Fatalf("model metadata request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 before a model is bound, got %d", resp.StatusCode)
+	}
+
+	srv.SetModel(&v1alpha1.Model{
+		ApiVersion: v1alpha1.APIVersion,
+		Kind:       v1alpha1.KindModel,
+		Metadata:   &v1alpha1.ObjectMeta{Name: "deepseek", Atespace: "default"},
+		Spec: &v1alpha1.ModelSpec{
+			Provider:  "openai",
+			Model:     "deepseek-chat",
+			BaseUrl:   "https://api.deepseek.com/v1",
+			SecretKey: &v1alpha1.SecretKeyRef{Name: "deepseek-api-secret", Key: "DEEPSEEK_API_KEY"},
+		},
+	})
+
+	resp, err = http.Get("http://127.0.0.1:9997/metadata/v1alpha1/ax/model")
+	if err != nil {
+		t.Fatalf("model metadata request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 with a bound model, got %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"name: deepseek", "baseURL: https://api.deepseek.com/v1", "DEEPSEEK_API_KEY"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("expected model metadata to contain %q, got:\n%s", want, body)
+		}
+	}
+	if strings.Contains(string(body), "sk-") {
+		t.Errorf("model metadata must never carry a secret value:\n%s", body)
 	}
 }
