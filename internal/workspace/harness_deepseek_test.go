@@ -161,6 +161,18 @@ func TestDeepSeekHarness_Settings(t *testing.T) {
 			if got := models[0].(map[string]any)["id"]; got != tt.spec.GetModel() {
 				t.Errorf("model id = %v, want %q", got, tt.spec.GetModel())
 			}
+			// Registering the route is not enough: the agent must also be pointed
+			// at it, or the profile's own default adapter serves the request.
+			defaultModel, ok := doc["agent-default-model"].(map[string]any)
+			if !ok {
+				t.Fatalf("expected an agent-default-model section:\n%s", raw)
+			}
+			if defaultModel["provider"] != "deepseek" {
+				t.Errorf("default provider = %v, want the Model-named route", defaultModel["provider"])
+			}
+			if defaultModel["model"] != tt.spec.GetModel() {
+				t.Errorf("default model = %v, want %q", defaultModel["model"], tt.spec.GetModel())
+			}
 			// Only the provider binding is generated: no patches, presets, or
 			// AGENTS.md (manifest-driven curation is not implemented yet).
 			for _, key := range []string{"runtime.patch.yml", "agent-presets", "AGENTS.md"} {

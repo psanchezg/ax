@@ -171,6 +171,14 @@ func dshSettings(m *v1alpha1.Model) ([]byte, error) {
 				m.GetMetadata().GetName(): entry,
 			},
 		},
+		// Registering the route is not enough. The shipped profile mounts its own
+		// DeepSeek adapter as the default selection, so a fresh agent asks for
+		// that route and our provider entry would never be used. Naming our route
+		// here is what binds the agent to the Model AX resolved.
+		"agent-default-model": map[string]any{
+			"provider": m.GetMetadata().GetName(),
+			"model":    m.GetSpec().GetModel(),
+		},
 	}
 	out, err := yaml.Marshal(doc)
 	if err != nil {
