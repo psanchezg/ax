@@ -17,6 +17,7 @@ package model_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -282,6 +283,75 @@ func TestClient_DefaultModelStore(t *testing.T) {
 	}
 	if clientWithStore.Config().APIKey != "store-secret-resolved-999" {
 		t.Errorf("expected APIKey 'store-secret-resolved-999', got %q", clientWithStore.Config().APIKey)
+	}
+}
+
+// TestClient_NoFallbackWithoutOptIn is the FR-006 regression: nothing outside
+// the explicit DisableRemote test opt-in may fabricate a completion.
+func TestClient_NoFallbackWithoutOptIn(t *testing.T) {
+	t.Run("empty api key", func(t *testing.T) {
+		client := model.NewClient(model.Config{Provider: "google", Model: "gemini-3.8-flash"})
+		resp, err := client.Generate(context.Background(), &model.GenerateRequest{Prompt: "Plan"})
+		if err == nil {
+			t.Fatalf("expected an error, got fabricated response %+v", resp)
+		}
+		if !strings.Contains(err.Error(), "missing API key") {
+			t.Errorf("expected a missing-key error, got %v", err)
+		}
+	})
+
+	t.Run("unknown provider", func(t *testing.T) {
+		client := model.NewClient(model.Config{Provider: "gemini-flash", Model: "x", APIKey: "k"})
+		_, err := client.Generate(context.Background(), &model.GenerateRequest{Prompt: "Plan"})
+		if err == nil {
+			t.Fatal("expected an error for an unknown provider")
+		}
+		for _, want := range []string{"gemini-flash", "google", "openai", "anthropic"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("expected error to mention %q, got %v", want, err)
+			}
+		}
+	})
+
+	t.Run("transport failure", func(t *testing.T) {
+		client := model.NewClient(model.Config{
+			Provider: "google",
+			Model:    "gemini-3.8-flash",
+			BaseURL:  "http://127.0.0.1:1",
+			APIKey:   "k",
+		})
+		_, err := client.Generate(context.Background(), &model.GenerateRequest{Prompt: "Plan"})
+		var perr *model.ProviderError
+		if !errors.As(err, &perr) {
+			t.Fatalf("expected *ProviderError, got %v", err)
+		}
+	})
+
+	t.Run("explicit opt-in still fabricates for tests", func(t *testing.T) {
+		client := model.NewDefaultClient(model.WithDisableRemote(true))
+		resp, err := client.Generate(context.Background(), &model.GenerateRequest{Prompt: "Plan"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Content == "" {
+			t.Error("expected the deterministic test response")
+		}
+	})
+}
+
+// TestClient_ConfigFromSpec_BaseURL pins the manifest wiring of ModelSpec.base_url.
+func TestClient_ConfigFromSpec_BaseURL(t *testing.T) {
+	cfg := model.ConfigFromSpec(&v1alpha1.ModelSpec{
+		Provider: "openai",
+		Model:    "deepseek-chat",
+		BaseUrl:  "https://api.deepseek.com/v1/",
+	})
+	if cfg.BaseURL != "https://api.deepseek.com/v1" {
+		t.Errorf("expected a trailing-slash-trimmed base URL, got %q", cfg.BaseURL)
+	}
+	client := model.NewClient(cfg)
+	if got := client.Spec().GetBaseUrl(); got != "https://api.deepseek.com/v1" {
+		t.Errorf("expected Spec() to carry the base URL, got %q", got)
 	}
 }
 

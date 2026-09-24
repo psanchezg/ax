@@ -15,7 +15,6 @@
 package model
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -23,7 +22,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -91,6 +89,7 @@ func ConfigFromSpec(spec *v1alpha1.ModelSpec) Config {
 		Model:      spec.Model,
 		Parameters: spec.GetParameters().AsMap(),
 		SecretKey:  secKey,
+		BaseURL:    strings.TrimRight(spec.GetBaseUrl(), "/"),
 	}
 }
 
@@ -445,6 +444,7 @@ func (c *Client) Spec() *v1alpha1.ModelSpec {
 		Provider:  c.cfg.Provider,
 		Model:     c.cfg.Model,
 		SecretKey: c.cfg.SecretKey,
+		BaseUrl:   c.cfg.BaseURL,
 	}
 	if len(c.cfg.Parameters) > 0 {
 		// Values that cannot be represented in a Struct (only JSON-like types can)
@@ -484,127 +484,31 @@ func (c *Client) Generate(ctx context.Context, req *GenerateRequest) (*GenerateR
 	}
 
 	provider := strings.ToLower(c.cfg.Provider)
-	if provider == "" || provider == ProviderGoogle {
-		return c.generateGoogle(ctx, effectiveReq)
+	if provider == "" {
+		provider = ProviderGoogle
 	}
 
+	// DisableRemote is the explicit, test-only opt-in for deterministic offline
+	// generation. It is the only path that can return text without a real call;
+	// every real failure surfaces as a typed error instead.
 	if c.cfg.DisableRemote {
 		return c.fallbackResponse(effectiveReq), nil
 	}
 
-	return nil, fmt.Errorf("unsupported provider %q", c.cfg.Provider)
+	factory, ok := Lookup(provider)
+	if !ok {
+		return nil, &ProviderError{
+			Provider: c.cfg.Provider,
+			Err: fmt.Errorf("unsupported provider %q (valid providers: %s)",
+				c.cfg.Provider, strings.Join(Known(), ", ")),
+		}
+	}
+	return factory(c.cfg, c.httpClient).Generate(ctx, effectiveReq)
 }
 
-// generateGoogle communicates with Google Generative Language API for Gemini models.
-func (c *Client) generateGoogle(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
-	if c.cfg.DisableRemote || c.cfg.APIKey == "" {
-		return c.fallbackResponse(req), nil
-	}
-
-	baseURL := c.cfg.BaseURL
-	if baseURL == "" {
-		baseURL = "https://generativelanguage.googleapis.com"
-	}
-
-	endpoint := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", baseURL, req.Model, c.cfg.APIKey)
-
-	payload := map[string]interface{}{
-		"contents": []map[string]interface{}{
-			{
-				"parts": []map[string]string{
-					{"text": req.Prompt},
-				},
-			},
-		},
-	}
-
-	if req.SystemInstruction != "" {
-		payload["systemInstruction"] = map[string]interface{}{
-			"parts": []map[string]string{
-				{"text": req.SystemInstruction},
-			},
-		}
-	}
-
-	// Configured parameters go through as-is; per-request values override them.
-	genConfig := map[string]interface{}{}
-	for k, v := range c.cfg.Parameters {
-		if k != systemInstructionParam {
-			genConfig[k] = v
-		}
-	}
-	if req.Temperature > 0 {
-		genConfig["temperature"] = req.Temperature
-	}
-	if req.MaxTokens > 0 {
-		genConfig["maxOutputTokens"] = req.MaxTokens
-	}
-	if len(genConfig) > 0 {
-		payload["generationConfig"] = genConfig
-	}
-
-	reqBody, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, fmt.Errorf("creating http request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return c.fallbackResponse(req), nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return c.fallbackResponse(req), nil
-		}
-		return nil, fmt.Errorf("gemini api error %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
-	}
-
-	var geminiResp struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
-		UsageMetadata struct {
-			PromptTokenCount     int `json:"promptTokenCount"`
-			CandidatesTokenCount int `json:"candidatesTokenCount"`
-			TotalTokenCount      int `json:"totalTokenCount"`
-		} `json:"usageMetadata"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
-		return nil, fmt.Errorf("decoding gemini response: %w", err)
-	}
-
-	var textBuilder strings.Builder
-	if len(geminiResp.Candidates) > 0 {
-		for _, p := range geminiResp.Candidates[0].Content.Parts {
-			textBuilder.WriteString(p.Text)
-		}
-	}
-
-	return &GenerateResponse{
-		Model:   req.Model,
-		Content: textBuilder.String(),
-		Usage: UsageStats{
-			PromptTokens:     geminiResp.UsageMetadata.PromptTokenCount,
-			CompletionTokens: geminiResp.UsageMetadata.CandidatesTokenCount,
-			TotalTokens:      geminiResp.UsageMetadata.TotalTokenCount,
-		},
-	}, nil
-}
-
+// fallbackResponse fabricates a deterministic completion for the explicit
+// DisableRemote test opt-in. It MUST NOT be called from any other path:
+// misconfiguration and provider failures surface as *ProviderError.
 func (c *Client) fallbackResponse(req *GenerateRequest) *GenerateResponse {
 	content := fmt.Sprintf(
 		"Synthesized plan using %s: Workspace environment configured with development toolchain and dependencies matching declared goal.",
