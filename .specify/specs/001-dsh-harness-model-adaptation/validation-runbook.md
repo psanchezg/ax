@@ -338,8 +338,8 @@ Limpieza:
 kill $SERVER_PID; docker stop ax-runbook-redis
 ```
 
-- [ ] Provider con typo rechazado nombrando los válidos
-- [ ] `Model`, `Workspace` y `Task` creados y leídos
+- [X] Provider con typo rechazado nombrando los válidos
+- [X] `Model`, `Workspace` y `Task` creados y leídos
 
 ---
 
@@ -380,6 +380,34 @@ en Docker Desktop sobre macOS— desactiva micro-VMs y sigue con gVisor**. El de
 
 Si la Control API no se llama `api` o no escucha en 443, no hace falta tocar código: el
 `ax-controller` acepta `--substrate-endpoint` y `--substrate-authority`.
+
+#### ⚠️ La trampa de macOS que cuesta una hora: `DOCKER_DEFAULT_PLATFORM`
+
+En Apple Silicon, kind usa la plataforma por defecto de Docker para la imagen del nodo. Si
+tienes `DOCKER_DEFAULT_PLATFORM=linux/amd64` (es fácil que esté en `~/.zshrc` por otro
+proyecto), el nodo se crea **amd64 y emulado**, y `containerd`/`kubelet` entran en
+crash-loop: el clúster queda en `NotReady` y parece un timeout de bootstrap.
+
+```bash
+echo "$DOCKER_DEFAULT_PLATFORM"                     # ¿dice linux/amd64?
+docker logs ax-test-control-plane 2>&1 | grep -m1 "Detected architecture"
+#   amd64 → nodo emulado (mal);  arm64 → correcto
+
+# Arréglalo solo para esta shell y rehaz el clúster:
+unset DOCKER_DEFAULT_PLATFORM
+kind delete cluster --name ax-test
+docker rmi -f kindest/node:v1.37.0
+docker pull --platform linux/arm64 kindest/node:v1.37.0
+hack/create-kind-cluster.sh
+```
+
+Merece la pena quitar ese `export` del `~/.zshrc` y pasarlo por comando
+(`DOCKER_DEFAULT_PLATFORM=linux/amd64 docker build …`) cuando lo necesites: si no, afecta
+también a la imagen del runner y a cualquier `docker build` de este flujo.
+
+Y una advertencia sobre kind: su `--wait` por defecto **no espera al control-plane**, así
+que un nodo roto se reporta como creación correcta. Comprueba siempre con
+`kubectl get nodes` que el nodo está `Ready` antes de seguir.
 
 Después, AX. El registry local del clúster es lo que permite desplegar sin publicar nada:
 
