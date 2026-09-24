@@ -21,7 +21,7 @@ below. Format: **Decision** / **Rationale** / **Alternatives considered**.
   - *Drop the row via a static `--patch` in the harness* — rejected: second generated
     artifact, contradicts FR-018 and YAGNI until field evidence shows goal-degrading
     question loops.
-  - *Ship a custom `ax-headless` preset without the row* — rejected: preset shipping is
+  - *Ship a custom `headless` preset without the row* — rejected: preset shipping is
     Phase 4.
   - *Keep an interactive answerer* — rejected: no human exists inside a sandbox.
 
@@ -184,11 +184,11 @@ below. Format: **Decision** / **Rationale** / **Alternatives considered**.
      → `anthropic-messages`, `google` → `openai-completions` against Gemini's
      OpenAI-compatible endpoint with base `https://generativelanguage.googleapis.com/v1beta/openai/`),
      `models[].id` = `spec.model`;
-  2. runs `dsh --profile ax-headless "<goal>"` as the one-shot headless session
+  2. runs `dsh --profile headless "<goal>"` as the one-shot headless session
      (goal → prompt contract identical to Antigravity, FR-016);
   3. sets `DSH_HOME=/ax/dsh` (R2), `DSH_PERMISSION_MODE=danger-full-access` (R14), and
      inherits the container environment carrying the Model credential (R9).
-  The profile `ax-headless` (created via `--from-default-profile headless`) is baked at
+  The profile `headless` (created via `--from-default-profile headless`) is baked at
   image build time (FR-019). No `--patch`, no `agent-presets/`, no MCP/skills codegen —
   only the `settings.yaml` binding (FR-018). `harness.command`, when set, replaces argv
   after `dsh`; `harness.env` is merged into the process environment;
@@ -214,15 +214,26 @@ below. Format: **Decision** / **Rationale** / **Alternatives considered**.
 ## R13. DSH image strategy
 
 - **Decision**: New `Dockerfile.task-runner-dsh` (node:22-slim, `@deepseek-ai/dsh`
-  pinned, pre-baked `ax-headless` profile copied to `/ax/dsh/profiles/ax-headless/`,
-  `ENV DSH_HOME=/ax/dsh`, same `ax-task-runner` entrypoint). `Dockerfile.task-runner`
-  is untouched. `harness.image` on the workspace selects the runner image per task
-  (FR-012); without it, the existing Python/Antigravity image is used.
+  pinned through an `ARG DSH_VERSION`, apt deps, `ENV DSH_HOME=/ax/dsh`, same
+  `ax-task-runner` entrypoint). `Dockerfile.task-runner` is untouched.
+  `harness.image` on the workspace selects the runner image per task (FR-012);
+  without it, the existing Python/Antigravity image is used.
+- **Profile correction (implementation finding)**: the plan originally pre-baked a
+  custom `ax-headless` profile via `--from-default-profile`, but that is a *launcher*
+  flag: it creates the profile **and boots it**, so it cannot run during an image
+  build. DSH's shipped `headless` profile already auto-initializes on first use from
+  shipped templates, and the bundles resolve from the local installation first, so no
+  registry access is involved. AX therefore runs the shipped `headless` profile and
+  adds only `$DSH_HOME/settings.yaml` for the provider binding. That satisfies SC-008
+  (first boot needs no npm egress) without a build-time DSH launch.
 - **Rationale**: FR-017/SC-009 and the doc §8 image-growth risk; Antigravity users see
-  zero change. Profile pre-baking keeps first boot free of npm egress (SC-008).
+  zero change; using the shipped profile removes a moving part (a hand-maintained
+  profile directory in the repo) that could drift from the pinned DSH version.
 - **Alternatives considered**: one combined image (rejected: grows the Antigravity image,
   violates SC-009 spirit); runtime `dsh plugin` install (rejected: needs npm egress,
-  adds minutes of setup latency).
+  adds minutes of setup latency); committing a generated `dsh-profile/` directory
+  (rejected: drifts from the pinned DSH version, and `--from-default-profile` cannot be
+  run headlessly to regenerate it).
 
 ## R14. Single isolation boundary
 

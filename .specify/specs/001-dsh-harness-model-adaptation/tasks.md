@@ -27,8 +27,8 @@ Repository layout per [plan.md](./plan.md) Project Structure: Go monorepo — `p
 
 **Purpose**: Verify the baseline and the tooling this feature relies on
 
-- [ ] T001 Run the full quality gate on branch `001-dsh-harness-model-adaptation` and confirm green baseline: `make test`, `make build`, `go mod tidy` + `git diff --exit-code go.mod go.sum`, `gofmt -l .`, `go vet ./...`
-- [ ] T002 [P] Verify the proto regeneration workflow for `pkg/apis/v1alpha1` (protoc/make invocation used by `pkg/apis/v1alpha1/ax.proto`) reproduces `pkg/apis/v1alpha1/*.pb.go` as a clean no-op
+- [X] T001 Run the full quality gate on branch `001-dsh-harness-model-adaptation` and confirm green baseline: `make test`, `make build`, `go mod tidy` + `git diff --exit-code go.mod go.sum`, `gofmt -l .`, `go vet ./...`
+- [X] T002 [P] Verify the proto regeneration workflow for `pkg/apis/v1alpha1` (protoc/make invocation used by `pkg/apis/v1alpha1/ax.proto`) reproduces `pkg/apis/v1alpha1/*.pb.go` as a clean no-op
 
 ---
 
@@ -38,9 +38,9 @@ Repository layout per [plan.md](./plan.md) Project Structure: Go monorepo — `p
 
 **⚠️ CRITICAL**: US1, US3, and US4 cannot begin until this phase is complete. US2 (manifest-only) is the one story that is independent of this phase.
 
-- [ ] T003 Proto commit 1 `feat(api): add base_url to ModelSpec`: add `string base_url = 8 [json_name = "baseURL"];` to `ModelSpec` in `pkg/apis/v1alpha1/ax.proto` (keep `reserved 3, 4, 5` untouched), regenerate `pkg/apis/v1alpha1/*.pb.go` in the same commit, and add dual-spelling decode + round-trip tests (`baseURL` and `base_url` accepted; unknown fields round-trip without loss) in `pkg/apis/v1alpha1/types_test.go`
-- [ ] T004 Proto commit 2 `feat(api): add AgentHarness to WorkspaceSpec`: add `message AgentHarness` (fields: `kind = 1`, `image = 2`, `command = 3` repeated string, `model_ref = 4 [json_name = "modelRef"]`, `env = 5` repeated `EnvVar`, `system_instructions = 6 [json_name = "systemInstructions"]`) and `AgentHarness harness = 4;` to `WorkspaceSpec` in `pkg/apis/v1alpha1/ax.proto`, regenerate `pkg/apis/v1alpha1/*.pb.go` in the same commit, with decode tests in `pkg/apis/v1alpha1/types_test.go` (depends: T003)
-- [ ] T005 [P] Add version-skew round-trip tests proving old-decoder safety (unknown fields preserved, typo rejection intact per `pkg/apis/v1alpha1/types_test.go:128`) in `pkg/apis/v1alpha1/types_test.go` (SC-006; depends: T003, T004 — same file as T004, run after it)
+- [X] T003 Proto commit 1 `feat(api): add base_url to ModelSpec`: add `string base_url = 8 [json_name = "baseURL"];` to `ModelSpec` in `pkg/apis/v1alpha1/ax.proto` (keep `reserved 3, 4, 5` untouched), regenerate `pkg/apis/v1alpha1/*.pb.go` in the same commit, and add dual-spelling decode + round-trip tests (`baseURL` and `base_url` accepted; unknown fields round-trip without loss) in `pkg/apis/v1alpha1/types_test.go`
+- [X] T004 Proto commit 2 `feat(api): add AgentHarness to WorkspaceSpec`: add `message AgentHarness` (fields: `kind = 1`, `image = 2`, `command = 3` repeated string, `model_ref = 4 [json_name = "modelRef"]`, `env = 5` repeated `EnvVar`, `system_instructions = 6 [json_name = "systemInstructions"]`) and `AgentHarness harness = 4;` to `WorkspaceSpec` in `pkg/apis/v1alpha1/ax.proto`, regenerate `pkg/apis/v1alpha1/*.pb.go` in the same commit, with decode tests in `pkg/apis/v1alpha1/types_test.go` (depends: T003)
+- [X] T005 [P] Add version-skew round-trip tests proving old-decoder safety (unknown fields preserved, typo rejection intact per `pkg/apis/v1alpha1/types_test.go:128`) in `pkg/apis/v1alpha1/types_test.go` (SC-006; depends: T003, T004 — same file as T004, run after it)
 
 **Checkpoint**: API delta complete and isolated in two cherry-pickable commits — story implementation can begin
 
@@ -56,25 +56,25 @@ Repository layout per [plan.md](./plan.md) Project Structure: Go monorepo — `p
 
 > **NOTE: Write these tests FIRST (red); they land in the same commit as the implementation (Constitution III).**
 
-- [ ] T006 [P] [US1] Registry table tests (register, lookup, duplicate-name rejection, unknown-provider error listing `Known()` names) in `internal/model/provider_test.go`
-- [ ] T007 [P] [US1] OpenAI adapter tests via `net/http/httptest`: 2xx → `choices[0].message.content` mapping, 4xx/5xx → `*ProviderError` carrying status and body, empty-key short-circuit, context cancellation, malformed body, in `internal/model/openai_test.go`
-- [ ] T008 [P] [US1] Anthropic adapter tests via `net/http/httptest`: 2xx → first `type == "text"` block mapping, `x-api-key` + `anthropic-version: 2023-06-01` headers, `max_tokens` default `4096` when absent, 4xx/5xx → `*ProviderError` with status and body, empty-key short-circuit, cancellation, in `internal/model/anthropic_test.go`
-- [ ] T009 [P] [US1] Parameter translation table tests (`maxOutputTokens`/`maxTokens` → `max_tokens`, `topP` → `top_p`, `topK` → `top_k`, `stopSequences` → `stop`/`stop_sequences`, `candidateCount` → `n`, unknown keys verbatim) in `internal/model/params_test.go`
-- [ ] T010 [P] [US1] Fallback regression tests: with the `DisableRemote` opt-in unset, empty keys, 4xx/5xx, and transport failures all yield `*ProviderError` and **zero fabricated text** (FR-006, SC-002) in `internal/model/client_test.go`
-- [ ] T011 [P] [US1] Google byte-compatibility guard tests (same request shape, `generationConfig` pass-through unchanged, SC-005/SC-009) in `internal/model/google_test.go`
-- [ ] T012 [P] [US1] `UpdateModel` validation tests: unknown provider rejected at apply with the list of valid values (SC-003); empty/`google` accepted; malformed `baseURL` rejected; invalid `secretKey.key` env name rejected in `internal/server/server_test.go`
+- [X] T006 [P] [US1] Registry table tests (register, lookup, duplicate-name rejection, unknown-provider error listing `Known()` names) in `internal/model/provider_test.go`
+- [X] T007 [P] [US1] OpenAI adapter tests via `net/http/httptest`: 2xx → `choices[0].message.content` mapping, 4xx/5xx → `*ProviderError` carrying status and body, empty-key short-circuit, context cancellation, malformed body, in `internal/model/openai_test.go`
+- [X] T008 [P] [US1] Anthropic adapter tests via `net/http/httptest`: 2xx → first `type == "text"` block mapping, `x-api-key` + `anthropic-version: 2023-06-01` headers, `max_tokens` default `4096` when absent, 4xx/5xx → `*ProviderError` with status and body, empty-key short-circuit, cancellation, in `internal/model/anthropic_test.go`
+- [X] T009 [P] [US1] Parameter translation table tests (`maxOutputTokens`/`maxTokens` → `max_tokens`, `topP` → `top_p`, `topK` → `top_k`, `stopSequences` → `stop`/`stop_sequences`, `candidateCount` → `n`, unknown keys verbatim) in `internal/model/params_test.go`
+- [X] T010 [P] [US1] Fallback regression tests: with the `DisableRemote` opt-in unset, empty keys, 4xx/5xx, and transport failures all yield `*ProviderError` and **zero fabricated text** (FR-006, SC-002) in `internal/model/client_test.go`
+- [X] T011 [P] [US1] Google byte-compatibility guard tests (same request shape, `generationConfig` pass-through unchanged, SC-005/SC-009) in `internal/model/google_test.go`
+- [X] T012 [P] [US1] `UpdateModel` validation tests: unknown provider rejected at apply with the list of valid values (SC-003); empty/`google` accepted; malformed `baseURL` rejected; invalid `secretKey.key` env name rejected in `internal/server/server_test.go`
 
 ### Implementation for User Story 1
 
-- [ ] T013 [US1] Implement `ProviderError` (`Provider`, `StatusCode`, `Body`, wrapped `Err` with `Unwrap()`), the `Provider` interface (`Name()`, `Generate(ctx, *GenerateRequest) (*GenerateResponse, error)`), and the `Register`/`Known`/`NewClient` registry in `internal/model/provider.go` (depends: T006)
-- [ ] T014 [US1] Move `generateGoogle` behind the `google` provider implementation with byte-identical request/response behavior in `internal/model/google.go` (depends: T011, T013)
-- [ ] T015 [P] [US1] Implement the `openai` adapter: `POST {baseURL}/chat/completions`, `Authorization: Bearer <key>`, request `{"model", "messages":[{"role":"user","content":<prompt>}], <translated params>}` in `internal/model/openai.go` (depends: T013)
-- [ ] T016 [P] [US1] Implement the `anthropic` adapter: `POST {baseURL or https://api.anthropic.com}/v1/messages`, `x-api-key` + `anthropic-version: 2023-06-01`, request `{"model", "max_tokens", "messages":[...], <translated params>}` in `internal/model/anthropic.go` (depends: T013)
-- [ ] T017 [US1] Implement per-provider parameter translation tables (research.md R5: translated known Gemini spellings, unknown keys pass through verbatim) in `internal/model/params.go` (depends: T009)
-- [ ] T018 [US1] Wire `ConfigFromSpec` to copy `ModelSpec.base_url` (FR-004), dispatch `Generate` through the registry (`strings.ToLower`; `""` ≡ `google`), and remove `fallbackResponse` from every non-test path — it survives only behind the explicit `DisableRemote` test opt-in — in `internal/model/client.go` (depends: T013–T017)
-- [ ] T019 [US1] Implement `UpdateModel` provider validation in `internal/server/server.go`: lowercased `spec.provider` must exist in the registry (empty ≡ `google`), else reject with the sorted list of valid names; validate `baseURL` parses as an `http(s)` URL and `secretKey.key` is a valid env var name (depends: T012, T013)
-- [ ] T020 [P] [US1] Create `examples/model-deepseek.yaml` (`provider: openai`, `model: deepseek-chat`, `baseURL: https://api.deepseek.com/v1`, `secretKey: {name: deepseek-api-secret, key: DEEPSEEK_API_KEY}`) and `examples/model-local-qwen.yaml` (credential-less local vLLM example) with obvious placeholders only
-- [ ] T021 [P] [US1] Update `docs/manifests.md` so the `provider: anthropic` example (lines ~130–158) works as written, and document `baseURL` + the valid provider values alongside it
+- [X] T013 [US1] Implement `ProviderError` (`Provider`, `StatusCode`, `Body`, wrapped `Err` with `Unwrap()`), the `Provider` interface (`Name()`, `Generate(ctx, *GenerateRequest) (*GenerateResponse, error)`), and the `Register`/`Known`/`NewClient` registry in `internal/model/provider.go` (depends: T006)
+- [X] T014 [US1] Move `generateGoogle` behind the `google` provider implementation with byte-identical request/response behavior in `internal/model/google.go` (depends: T011, T013)
+- [X] T015 [P] [US1] Implement the `openai` adapter: `POST {baseURL}/chat/completions`, `Authorization: Bearer <key>`, request `{"model", "messages":[{"role":"user","content":<prompt>}], <translated params>}` in `internal/model/openai.go` (depends: T013)
+- [X] T016 [P] [US1] Implement the `anthropic` adapter: `POST {baseURL or https://api.anthropic.com}/v1/messages`, `x-api-key` + `anthropic-version: 2023-06-01`, request `{"model", "max_tokens", "messages":[...], <translated params>}` in `internal/model/anthropic.go` (depends: T013)
+- [X] T017 [US1] Implement per-provider parameter translation tables (research.md R5: translated known Gemini spellings, unknown keys pass through verbatim) in `internal/model/params.go` (depends: T009)
+- [X] T018 [US1] Wire `ConfigFromSpec` to copy `ModelSpec.base_url` (FR-004), dispatch `Generate` through the registry (`strings.ToLower`; `""` ≡ `google`), and remove `fallbackResponse` from every non-test path — it survives only behind the explicit `DisableRemote` test opt-in — in `internal/model/client.go` (depends: T013–T017)
+- [X] T019 [US1] Implement `UpdateModel` provider validation in `internal/server/server.go`: lowercased `spec.provider` must exist in the registry (empty ≡ `google`), else reject with the sorted list of valid names; validate `baseURL` parses as an `http(s)` URL and `secretKey.key` is a valid env var name (depends: T012, T013)
+- [X] T020 [P] [US1] Create `examples/model-deepseek.yaml` (`provider: openai`, `model: deepseek-chat`, `baseURL: https://api.deepseek.com/v1`, `secretKey: {name: deepseek-api-secret, key: DEEPSEEK_API_KEY}`) and `examples/model-local-qwen.yaml` (credential-less local vLLM example) with obvious placeholders only
+- [X] T021 [P] [US1] Update `docs/manifests.md` so the `provider: anthropic` example (lines ~130–158) works as written, and document `baseURL` + the valid provider values alongside it
 
 **Checkpoint**: User Story 1 fully functional and testable independently (MVP — quickstart.md §1)
 
@@ -88,9 +88,9 @@ Repository layout per [plan.md](./plan.md) Project Structure: Go monorepo — `p
 
 ### Implementation for User Story 2
 
-- [ ] T022 [P] [US2] Create `examples/task-dsh-demo.yaml` per spec: `Task` with `image: "ghcr.io/<org>/ax-dsh-runner@sha256:..."`, `command: ["dsh", "--profile", "headless", "Set up this workspace and report what you did."]`, `env` plain `name`/`value` only (task env has **no** `valueFrom`/secret reference today), workspace binding **without** a `goal`, `debug: true`
-- [ ] T023 [P] [US2] Create `docs/dsh-phase-0.md`: the runnable recipe, a self-contained throwaway image recipe (node:22-slim + pinned `@deepseek-ai/dsh` + `ax-task-runner`), the **double-bootstrap caveat** (a workspace `goal` plus `GEMINI_API_KEY` runs both harnesses — omit the `goal` in Phase 0), and the Gateway egress note (allowlist the model endpoint host:port; default `*:443` keeps out-of-the-box working)
-- [ ] T024 [US2] Validate the recipe verbatim against an unmodified deployment (quickstart.md §2): task reaches `Running`, `bin/ax ssh <task> -- ...` with `debug: true` shows the DSH process and workspace state (depends: T022, T023)
+- [X] T022 [P] [US2] Create `examples/task-dsh-demo.yaml` per spec: `Task` with `image: "ghcr.io/<org>/ax-dsh-runner@sha256:..."`, `command: ["dsh", "--profile", "headless", "Set up this workspace and report what you did."]`, `env` plain `name`/`value` only (task env has **no** `valueFrom`/secret reference today), workspace binding **without** a `goal`, `debug: true`
+- [X] T023 [P] [US2] Create `docs/dsh-phase-0.md`: the runnable recipe, a self-contained throwaway image recipe (node:22-slim + pinned `@deepseek-ai/dsh` + `ax-task-runner`), the **double-bootstrap caveat** (a workspace `goal` plus `GEMINI_API_KEY` runs both harnesses — omit the `goal` in Phase 0), and the Gateway egress note (allowlist the model endpoint host:port; default `*:443` keeps out-of-the-box working)
+- [X] T024 [US2] Validate the recipe verbatim against an unmodified deployment (quickstart.md §2): task reaches `Running`, `bin/ax ssh <task> -- ...` with `debug: true` shows the DSH process and workspace state (depends: T022, T023)
 
 **Checkpoint**: The DSH premise is proven end to end with zero AX code changes (FR-020)
 
@@ -104,16 +104,16 @@ Repository layout per [plan.md](./plan.md) Project Structure: Go monorepo — `p
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T025 [P] [US3] Reconciler tests in `internal/controller/reconciler_test.go`: model bound → secret value injected under `<Model.spec.secretKey.key>` + `AX_MODEL_BASE_URL` + `AX_MODEL_YAML`; **no model reference → `gemini-api-secret`/`GEMINI_API_KEY` injected exactly as today** (FR-009); unresolvable secret → typed error with **no partial injection**
-- [ ] T026 [P] [US3] Metadata server tests in `internal/metadata/server_test.go`: `/metadata/v1alpha1/ax/model` returns the bound `Model`; unbound → consistent empty/404 behavior alongside `/task` and `/workspaces`; **never serves secret values** (only the `secretKey` reference)
-- [ ] T027 [US3] Golden test asserting `AX_MODEL_YAML` content equals the metadata route's `Model` serialization (single source) in `internal/controller/reconciler_test.go` (depends: T025 — same file)
+- [X] T025 [P] [US3] Reconciler tests in `internal/controller/reconciler_test.go`: model bound → secret value injected under `<Model.spec.secretKey.key>` + `AX_MODEL_BASE_URL` + `AX_MODEL_YAML`; **no model reference → `gemini-api-secret`/`GEMINI_API_KEY` injected exactly as today** (FR-009); unresolvable secret → typed error with **no partial injection**
+- [X] T026 [P] [US3] Metadata server tests in `internal/metadata/server_test.go`: `/metadata/v1alpha1/ax/model` returns the bound `Model`; unbound → consistent empty/404 behavior alongside `/task` and `/workspaces`; **never serves secret values** (only the `secretKey` reference)
+- [X] T027 [US3] Golden test asserting `AX_MODEL_YAML` content equals the metadata route's `Model` serialization (single source) in `internal/controller/reconciler_test.go` (depends: T025 — same file)
 
 ### Implementation for User Story 3
 
-- [ ] T028 [US3] Replace `lookupGeminiKey` with `resolveModelCredential(ctx, atespace, modelRef)` reading the `Model` from the store and resolving `spec.secretKey` against the Kubernetes secret in `internal/controller/reconciler.go` (typed error on failure, no silent fallback to the Gemini literal when a model reference exists; legacy literal path preserved byte-for-byte when there is none) (depends: T025)
-- [ ] T029 [US3] Inject `<spec.secretKey.key>` (secret value) + `AX_MODEL_BASE_URL` (`spec.baseURL`, empty when unset) + `AX_MODEL_YAML` (serialized `Model`, reference not value) into the actor template env alongside `AX_TASK_YAML`/`AX_WORKSPACES_YAML` in `internal/controller/reconciler.go` (depends: T028)
-- [ ] T030 [US3] Add `GET /metadata/v1alpha1/ax/model` to `internal/metadata/server.go`, same content as `AX_MODEL_YAML`, consistent unbound behavior (depends: T026, T028)
-- [ ] T031 [P] [US3] Update the container contract in `docs/runner.md` to document the generalized credential variables (`<secretKey.key>`, `AX_MODEL_BASE_URL`, `AX_MODEL_YAML`) **instead of the hardcoded `GEMINI_API_KEY`** (FR-011), preserving the legacy pair note
+- [X] T028 [US3] Replace `lookupGeminiKey` with `resolveModelCredential(ctx, atespace, modelRef)` reading the `Model` from the store and resolving `spec.secretKey` against the Kubernetes secret in `internal/controller/reconciler.go` (typed error on failure, no silent fallback to the Gemini literal when a model reference exists; legacy literal path preserved byte-for-byte when there is none) (depends: T025)
+- [X] T029 [US3] Inject `<spec.secretKey.key>` (secret value) + `AX_MODEL_BASE_URL` (`spec.baseURL`, empty when unset) + `AX_MODEL_YAML` (serialized `Model`, reference not value) into the actor template env alongside `AX_TASK_YAML`/`AX_WORKSPACES_YAML` in `internal/controller/reconciler.go` (depends: T028)
+- [X] T030 [US3] Add `GET /metadata/v1alpha1/ax/model` to `internal/metadata/server.go`, same content as `AX_MODEL_YAML`, consistent unbound behavior (depends: T026, T028)
+- [X] T031 [P] [US3] Update the container contract in `docs/runner.md` to document the generalized credential variables (`<secretKey.key>`, `AX_MODEL_BASE_URL`, `AX_MODEL_YAML`) **instead of the hardcoded `GEMINI_API_KEY`** (FR-011), preserving the legacy pair note
 
 **Checkpoint**: Rotation is one secret update (SC-004); the last Gemini literal is gone from the control plane except the preserved legacy path
 
@@ -127,21 +127,21 @@ Repository layout per [plan.md](./plan.md) Project Structure: Go monorepo — `p
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T032 [P] [US4] Harness resolution table tests in `internal/workspace/harness_test.go`: `""`/unset → antigravity; `"antigravity"` explicit; `"deepseek-harness"`; unknown kind → typed `*UnsupportedHarnessError` and condition reason `UnsupportedHarness` naming the kind — **setup never silently skipped** (FR-013)
-- [ ] T033 [P] [US4] Golden tests for the generated `$DSH_HOME/settings.yaml` provider binding in `internal/workspace/harness_deepseek_test.go`: entry named after `Model.metadata.name`, `apiKeyEnv` = `spec.secretKey.key`, `baseURL` = `spec.baseURL`, `api` mapping `openai` → `openai-completions`, `anthropic` → `anthropic-messages`, `google` → `openai-completions` against `https://generativelanguage.googleapis.com/v1beta/openai/` (R18), `models[].id` = `spec.model`; **only** this binding is generated (FR-018 — no patch/presets/AGENTS.md/skills)
-- [ ] T034 [US4] Env/argv construction tests in `internal/workspace/harness_deepseek_test.go`: `DSH_HOME=/ax/dsh`, `DSH_PERMISSION_MODE=danger-full-access` (never overridable via `harness.env`), credential var inherited, default argv `dsh --profile ax-headless "<goal>"`, `harness.command` replaces argv after `dsh`, `harness.systemInstructions` prepended to the prompt; unresolvable `modelRef` → condition `UnresolvedModelRef` (depends: T033 — same file)
-- [ ] T035 [P] [US4] Isolation invariant test asserting the sandboxed agent cannot write outside `/workspace` while writes inside `/workspace` succeed (SC-007, mock Substrate gRPC boundary) in `runner/isolation_test.go`
-- [ ] T036 [US4] Verify the existing bootstrap tests pass **unmodified** (SC-009 byte-compatibility of the Antigravity path) in `internal/workspace/setup_test.go`
+- [X] T032 [P] [US4] Harness resolution table tests in `internal/workspace/harness_test.go`: `""`/unset → antigravity; `"antigravity"` explicit; `"deepseek-harness"`; unknown kind → typed `*UnsupportedHarnessError` and condition reason `UnsupportedHarness` naming the kind — **setup never silently skipped** (FR-013)
+- [X] T033 [P] [US4] Golden tests for the generated `$DSH_HOME/settings.yaml` provider binding in `internal/workspace/harness_deepseek_test.go`: entry named after `Model.metadata.name`, `apiKeyEnv` = `spec.secretKey.key`, `baseURL` = `spec.baseURL`, `api` mapping `openai` → `openai-completions`, `anthropic` → `anthropic-messages`, `google` → `openai-completions` against `https://generativelanguage.googleapis.com/v1beta/openai/` (R18), `models[].id` = `spec.model`; **only** this binding is generated (FR-018 — no patch/presets/AGENTS.md/skills)
+- [X] T034 [US4] Env/argv construction tests in `internal/workspace/harness_deepseek_test.go`: `DSH_HOME=/ax/dsh`, `DSH_PERMISSION_MODE=danger-full-access` (never overridable via `harness.env`), credential var inherited, default argv `dsh --profile headless "<goal>"`, `harness.command` replaces argv after `dsh`, `harness.systemInstructions` prepended to the prompt; unresolvable `modelRef` → condition `UnresolvedModelRef` (depends: T033 — same file)
+- [X] T035 [P] [US4] Isolation invariant test asserting the sandboxed agent cannot write outside `/workspace` while writes inside `/workspace` succeed (SC-007, mock Substrate gRPC boundary) in `runner/isolation_test.go`
+- [X] T036 [US4] Verify the existing bootstrap tests pass **unmodified** (SC-009 byte-compatibility of the Antigravity path) in `internal/workspace/setup_test.go`
 
 ### Implementation for User Story 4
 
-- [ ] T037 [US4] Implement the `Harness` interface (`Kind()`, `Setup(ctx, *v1alpha1.AgentHarness, goal, workspacePath string) error`), `Resolve(kind)` fail-closed resolver, and `*UnsupportedHarnessError` in `internal/workspace/harness.go` (depends: T032)
-- [ ] T038 [US4] Move `runBootstrap` semantics behind the `antigravity` harness with identical behavior — script `/usr/local/bin/antigravity_bootstrap.py` via `python3`, args `--goal/--workspace/--data-dir /ax/antigravity`, env `GEMINI_API_KEY` — in `internal/workspace/harness_antigravity.go` (depends: T036, T037)
-- [ ] T039 [US4] Implement `deepseek-harness` in `internal/workspace/harness_deepseek.go`: resolve the bound `Model` from `AX_MODEL_YAML`/`modelRef`, write **only** the minimal `$DSH_HOME/settings.yaml` binding (FR-018), set `DSH_HOME=/ax/dsh` and `DSH_PERMISSION_MODE=danger-full-access` (set by the implementation, never defaulted — R14), run `dsh --profile ax-headless "<goal>"` as the supervised child; run the shipped `standard` preset untouched (`dsh-tool-ask-user` questions surface but never block — R1) (depends: T033, T034, T037, T038)
-- [ ] T040 [US4] Dispatch `SetupWorkspace` through `Resolve()` in `internal/workspace/setup.go`: unknown kind → workspace not-`Ready` with condition reason `UnsupportedHarness`; unresolvable `modelRef` → `UnresolvedModelRef`; goal→prompt contract and `/readyz?check=workspace` semantics identical across harnesses (FR-016) (depends: T037–T039)
-- [ ] T041 [US4] Wire `harness.image` as the task-runner image override in `internal/controller/reconciler.go` (empty ⇒ existing Python/Antigravity image, unaffected) (depends: T040)
-- [ ] T042 [P] [US4] Create `Dockerfile.task-runner-dsh`: `FROM node:22-slim`, apt deps (git curl ca-certificates openssh-client procps bash), `npm install -g @deepseek-ai/dsh@<pinned observed version>`, **pre-bake the `ax-headless` profile** (via `--from-default-profile headless`) to `/ax/dsh/profiles/ax-headless/` so first boot needs no npm egress (FR-019, SC-008), `ENV DSH_HOME=/ax/dsh`, copy `ax-task-runner`, same entrypoint; leave `Dockerfile.task-runner` untouched (FR-017)
-- [ ] T043 [P] [US4] Create `examples/workspace-dsh.yaml` (`harness: {kind: deepseek-harness, modelRef: deepseek, image: ...}` with placeholder image ref)
+- [X] T037 [US4] Implement the `Harness` interface (`Kind()`, `Setup(ctx, *v1alpha1.AgentHarness, goal, workspacePath string) error`), `Resolve(kind)` fail-closed resolver, and `*UnsupportedHarnessError` in `internal/workspace/harness.go` (depends: T032)
+- [X] T038 [US4] Move `runBootstrap` semantics behind the `antigravity` harness with identical behavior — script `/usr/local/bin/antigravity_bootstrap.py` via `python3`, args `--goal/--workspace/--data-dir /ax/antigravity`, env `GEMINI_API_KEY` — in `internal/workspace/harness_antigravity.go` (depends: T036, T037)
+- [X] T039 [US4] Implement `deepseek-harness` in `internal/workspace/harness_deepseek.go`: resolve the bound `Model` from `AX_MODEL_YAML`/`modelRef`, write **only** the minimal `$DSH_HOME/settings.yaml` binding (FR-018), set `DSH_HOME=/ax/dsh` and `DSH_PERMISSION_MODE=danger-full-access` (set by the implementation, never defaulted — R14), run `dsh --profile headless "<goal>"` as the supervised child; run the shipped `standard` preset untouched (`dsh-tool-ask-user` questions surface but never block — R1) (depends: T033, T034, T037, T038)
+- [X] T040 [US4] Dispatch `SetupWorkspace` through `Resolve()` in `internal/workspace/setup.go`: unknown kind → workspace not-`Ready` with condition reason `UnsupportedHarness`; unresolvable `modelRef` → `UnresolvedModelRef`; goal→prompt contract and `/readyz?check=workspace` semantics identical across harnesses (FR-016) (depends: T037–T039)
+- [X] T041 [US4] Wire `harness.image` as the task-runner image override in `internal/controller/reconciler.go` (empty ⇒ existing Python/Antigravity image, unaffected) (depends: T040)
+- [X] T042 [P] [US4] Create `Dockerfile.task-runner-dsh`: `FROM node:22-slim`, apt deps (git curl ca-certificates openssh-client procps bash), `npm install -g @deepseek-ai/dsh@${DSH_VERSION}` from a pinned `ARG`, `ENV DSH_HOME=/ax/dsh`, copy `bin/linux_amd64/ax-task-runner` to `/usr/local/bin/`, same entrypoint; **no custom profile** — the shipped `headless` profile auto-initializes from the package's local templates, so first boot needs no npm egress (FR-019, SC-008, research.md R13); leave `Dockerfile.task-runner` untouched (FR-017)
+- [X] T043 [P] [US4] Create `examples/workspace-dsh.yaml` (`harness: {kind: deepseek-harness, modelRef: deepseek, image: ...}` with placeholder image ref)
 
 **Checkpoint**: Declarative harness complete; Antigravity default preserved, DSH selectable per workspace (closes `docs/roadmap.md:32`)
 

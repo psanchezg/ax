@@ -116,7 +116,7 @@ EOF
 
 DSH happy path: `examples/workspace-dsh.yaml` (`harness.kind: deepseek-harness`,
 `modelRef: deepseek`) + a task with a `goal`. Expected: runner executes
-`dsh --profile ax-headless "<goal>"` with the bound `Model`'s environment
+`dsh --profile headless "<goal>"` with the bound `Model`'s environment
 ([harness-interface.md](./contracts/harness-interface.md)).
 
 Default preservation (SC-005/SC-009): the same manifest **without** `harness` runs

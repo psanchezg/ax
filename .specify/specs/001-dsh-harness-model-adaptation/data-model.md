@@ -80,7 +80,7 @@ Legacy shape (no model reference): fixed pair (`gemini-api-secret`, `GEMINI_API_
 Workspace ──spec.harness──▶ AgentHarness ──modelRef──▶ Model ──secretKey──▶ Kubernetes Secret
     │                            │
     │                            ├── kind: antigravity ──────▶ Harness#antigravity ──▶ /usr/local/bin/antigravity_bootstrap.py
-    │                            └── kind: deepseek-harness ─▶ Harness#deepseek-harness ──▶ dsh --profile ax-headless
+    │                            └── kind: deepseek-harness ─▶ Harness#deepseek-harness ──▶ dsh --profile headless
     │                                                                 │
     └── spec.goal ────────────────────────────────────────────────────┼──▶ prompt
                                                                       └──▶ $DSH_HOME/settings.yaml ◀── Model (provider/baseURL/model/key name)

@@ -16,10 +16,11 @@ package workspace
 type Harness interface {
     // Kind is the registry key ("antigravity", "deepseek-harness").
     Kind() string
-    // Setup receives the workspace goal and the bound harness spec. It is
-    // responsible for preparing the workspace and starting (or configuring) the
-    // agent so that /readyz?check=workspace keeps its current semantics (FR-016).
-    Setup(ctx context.Context, spec *v1alpha1.AgentHarness, goal, workspacePath string) error
+    // Setup receives the workspace goal and the bound harness spec. It prepares
+    // the workspace for this harness and reports whether the harness's own
+    // bootstrap ran (Antigravity's goal bootstrap), so /readyz?check=workspace
+    // keeps its current semantics (FR-016). An error fails the workspace.
+    Setup(ctx context.Context, spec *v1alpha1.AgentHarness, goal, workspacePath string) (bool, error)
 }
 
 // Resolve maps spec.Kind to an implementation. Empty ≡ "antigravity".
@@ -87,13 +88,15 @@ Setup sequence:
 4. **Invocation** — as the supervised child process (`spec.command` semantics):
 
    ```bash
-   dsh --profile ax-headless "<goal>"
+   dsh --profile headless "<goal>"
    ```
 
    `harness.command`, when set, replaces argv after `dsh`; `harness.systemInstructions`,
-   when set, is prepended to the goal prompt (documented limitation, R12). The
-   `ax-headless` profile is baked at image build time (`--from-default-profile headless`
-   + pre-installed plugins) so first boot needs no npm registry egress (FR-019, SC-008).
+   when set, is prepended to the goal prompt (documented limitation, R12). The command
+   is only used when the task spec sets none, so an explicit task command always wins.
+   The image installs the DSH CLI globally and runs the **shipped** `headless` profile,
+   which auto-initializes from the package's local templates, so first boot needs no npm
+   registry egress (FR-019, SC-008, research.md R13).
 5. **Preset policy (R1)** — the shipped `standard` preset runs untouched;
    `dsh-tool-ask-user` questions surface unanswered but never block (approval `never`).
    Documented in `docs/deepseek-harness.md`.
