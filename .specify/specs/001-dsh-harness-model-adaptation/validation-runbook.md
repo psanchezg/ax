@@ -21,6 +21,7 @@ make build                           # bin/ax, bin/ax-server, bin/ax-controller
 | `go version` | 1.27+ |
 | `docker info` | daemon accesible (nivel 2 y build de imágenes) |
 | `ko version` | instalado (nivel 2: `make deploy`) |
+| `kind version` | instalado (nivel 2: lo usa el script de Substrate) |
 | `dsh --help` | CLI presente (nivel 0.5) |
 
 ### ⚠️ Antes de nada: contra qué clúster apunta kubectl
@@ -258,62 +259,75 @@ El único nivel que prueba el objetivo completo. **Substrate es un proyecto apar
 no lo instala (`deploy/` solo trae Redis, server y controller). Sin una Control API
 alcanzable en `api.ate-system.svc.cluster.local:443`, este nivel no arranca.
 
-### 3.1 Clúster y AX
+### 3.1 Clúster y Substrate
 
-**Opción A (recomendada): kubeconfig dedicado.** Tu configuración normal no se toca —ni
-el contexto activo, ni la lista de clústeres—, y todo lo de este nivel queda contenido en
-un fichero temporal que borras al final:
+No crees el clúster a mano: Substrate trae el script que este nivel necesita, y crea
+además el **registry local** que luego usaremos para las imágenes de AX (los nodos de
+kind ya vienen configurados para tirar de él, con los feature gates que necesita su
+`podcertcontroller`).
 
 ```bash
-export KUBECONFIG=/tmp/ax-test.kubeconfig   # este shell ya no ve tu clúster remoto
-kind create cluster --name ax-test          # escribe el contexto en ESE fichero
-# equivalente explícito: kind create cluster --name ax-test --kubeconfig /tmp/ax-test.kubeconfig
-kubectl config current-context              # → kind-ax-test
-kubectl cluster-info >/dev/null && echo "cluster ok"
+# Aísla el kubeconfig para no tocar tu clúster remoto (§0). El script respeta $KUBECONFIG.
+export KUBECONFIG=/tmp/ax-test.kubeconfig
+export KIND_CLUSTER_NAME=ax-test        # evita que borre un kind llamado "kind" que ya tengas
+
+git clone https://github.com/agent-substrate/substrate.git /tmp/ax-substrate
+cd /tmp/ax-substrate
+hack/create-kind-cluster.sh             # clúster + registry localhost:5001 (KIND_REGISTRY_PORT)
+hack/install-ate-kind.sh --deploy-ate-system
+
+cd -                                    # vuelve al repo de AX
+kubectl config current-context          # → kind-ax-test
+kubectl get svc -n ate-system           # la Control API que AX espera (api.ate-system…)
+kubectl get pods -n ate-system
 ```
 
-`KUBECONFIG` es por shell: las secciones §3.3, §3.4 y §6 deben ejecutarse en el mismo
-shell (o reexportar la variable). Si abres otra terminal, repite el `export` antes de
-cualquier `kubectl` o `bin/ax`.
+Notas del script, leídas de su fuente: el clúster por defecto se llama `kind`
+(`KIND_CLUSTER_NAME` lo cambia), el registry local es `kind-registry` en
+`127.0.0.1:5001`, `IP_FAMILY` es `ipv4` por defecto, y **si no hay `/dev/kvm` —lo normal
+en Docker Desktop sobre macOS— desactiva micro-VMs y sigue con gVisor**. El desmontaje es
+`hack/delete-kind-cluster.sh`.
 
-**Opción B: usar tu kubeconfig y cambiar de contexto.** Válida, pero tu contexto activo
-cambia y hay que acordarse de volver:
+Si la Control API no se llama `api` o no escucha en 443, no hace falta tocar código: el
+`ax-controller` acepta `--substrate-endpoint` y `--substrate-authority`.
 
-```bash
-kind create cluster --name ax-test
-kubectl config use-context kind-ax-test
-CTX="$(kubectl config current-context)"
-if [ "$CTX" = "kind-ax-test" ]; then echo "ok: $CTX"; else echo "ABORTA: estás en $CTX, no en kind-ax-test"; fi
-```
-
-Si la guardia imprime `ABORTA`, cambia de contexto antes de seguir. Recuerda que `bin/ax`
-también resuelve el servidor por el contexto activo (hace port-forward a `ax-system`): un
-`ax` sin `--server` desde el contexto remoto apuntaría al AX de *ese* clúster.
-
-Después, en cualquiera de las dos opciones:
+Después, AX. El registry local del clúster es lo que permite desplegar sin publicar nada:
 
 ```bash
-# Instala Agent Substrate en ESTE clúster y comprueba su Control API:
-kubectl get svc -n ate-system
+# Arquitectura de los nodos: en Apple Silicon kind usa nodos arm64, así que las
+# imágenes deben ser arm64 (ko y docker build, ambos, con --platform).
+NODE_ARCH="$(docker exec ax-test-control-plane uname -m)"
+case "$NODE_ARCH" in aarch64|arm64) PLATFORM=linux/arm64 ;; *) PLATFORM=linux/amd64 ;; esac
+echo "nodos $NODE_ARCH → $PLATFORM"
 
-export AX_IMAGE_REPO=$REGISTRY        # ko publica aquí las imágenes del plano de control
-make deploy                           # redis + controller + server en ax-system
+export AX_IMAGE_REPO=localhost:5001/ax            # registry del clúster
+KO_DOCKER_REPO=$AX_IMAGE_REPO ko apply --platform=$PLATFORM -f deploy/redis.yaml
+KO_DOCKER_REPO=$AX_IMAGE_REPO ko apply --platform=$PLATFORM -f deploy/ax-server.yaml
+KO_DOCKER_REPO=$AX_IMAGE_REPO ko apply --platform=$PLATFORM -f deploy/ax-controller.yaml
 kubectl get pods -n ax-system
 ```
 
 - [ ] `kubectl config current-context` = `kind-ax-test`
-- [ ] Substrate accesible
+- [ ] Substrate instalado y su Control API visible en `ate-system`
 - [ ] Pods de `ax-system` en `Running`
+- [ ] La plataforma de las imágenes coincide con la de los nodos
 
 ### 3.2 Imagen del runner con DSH
 
 ```bash
-make build-task-runner                # bin/linux_amd64/ax-task-runner
-docker build --platform linux/amd64 -f Dockerfile.task-runner-dsh -t "$DSH_IMAGE" .
-docker push "$DSH_IMAGE"
+export DSH_IMAGE="localhost:5001/ax-dsh-runner:test1"   # el registry local del clúster
+
+# El runner se compila para linux/<arch> del nodo (make build-task-runner hace amd64 fijo).
+GOOS=linux GOARCH="${PLATFORM#linux/}" CGO_ENABLED=0 \
+  go build -trimpath -o bin/linux_${PLATFORM#linux/}/ax-task-runner ./cmd/ax-task-runner
+docker build --platform "$PLATFORM" -f Dockerfile.task-runner-dsh -t "$DSH_IMAGE" .
+docker push "$DSH_IMAGE"               # los nodos ya saben tirar de localhost:5001
 ```
 
-- [ ] Imagen publicada
+Si vuelves a construir con la **misma** etiqueta, los nodos pueden quedarse con la copia
+cacheada: sube la etiqueta (`:test2`) al repetir.
+
+- [ ] Imagen publicada en el registry del clúster, con la arquitectura correcta
 
 ### 3.3 Recursos de prueba
 
@@ -387,15 +401,18 @@ primer contacto y para descartar problemas de red/credenciales antes del nivel 2
 ## 6. Limpieza
 
 ```bash
-kind delete cluster --name ax-test
+# Substrate trae su propio desmontaje, que además borra el registry local:
+cd /tmp/ax-substrate && hack/delete-kind-cluster.sh && cd -
+
+# Si creaste un clúster kind pelado (§3.1, vía alternativa):
+# kind delete cluster --name ax-test
+
 docker rmi "$DSH_IMAGE" 2>/dev/null
 git checkout -- examples/workspace-dsh.yaml    # revierte la imagen que editaste
-rm -rf /tmp/ax-runbook
+rm -rf /tmp/ax-runbook /tmp/ax-substrate
 
-# Según la opción que elegiste en §3.1:
 unset KUBECONFIG
-rm -f /tmp/ax-test.kubeconfig                  # Opción A: nada quedó en tu kubeconfig
-# kubectl config use-context "$ORIG_CTX"       # Opción B: vuelve a tu contexto de siempre
+rm -f /tmp/ax-test.kubeconfig
 ```
 
 Comprueba con `kubectl config current-context` que vuelves a ver tu clúster remoto (y que
