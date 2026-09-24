@@ -121,3 +121,63 @@ spec:
   parameters:
     maxTokens: 16000
 ```
+
+### OpenAI-compatible and self-hosted endpoints
+
+`provider: openai` selects the OpenAI-compatible chat-completions adapter, which
+covers DeepSeek, OpenRouter, Together, Groq, Fireworks, and Baseten as well as
+local servers such as vLLM, Ollama, LM Studio, and llama.cpp. `baseURL` is used
+verbatim, including the API version prefix the endpoint expects.
+
+```yaml
+apiVersion: ax.io/v1alpha1
+kind: Model
+metadata:
+  name: deepseek
+  atespace: default
+spec:
+  provider: openai
+  model: deepseek-chat
+  baseURL: https://api.deepseek.com/v1
+  secretKey:
+    name: deepseek-api-secret
+    key: DEEPSEEK_API_KEY
+  parameters:
+    maxOutputTokens: 8000
+```
+
+For a credential-less local server, omit `secretKey`:
+
+```yaml
+apiVersion: ax.io/v1alpha1
+kind: Model
+metadata:
+  name: local-qwen
+  atespace: default
+spec:
+  provider: openai
+  model: Qwen/Qwen3-Coder-30B-A3B-Instruct
+  baseURL: http://vllm.default.svc.cluster.local:8000/v1
+```
+
+Runnable copies live in `examples/model-deepseek.yaml` and
+`examples/model-local-qwen.yaml`.
+
+### Providers and parameters
+
+| `provider` | Wire API | Endpoint |
+|---|---|---|
+| `google` (default when unset) | Gemini `generateContent` | Google Generative Language API, or `baseURL` |
+| `openai` | OpenAI-compatible `chat/completions` | `baseURL` (`https://api.openai.com/v1` when unset) |
+| `anthropic` | Anthropic Messages API | `baseURL` (`https://api.anthropic.com` when unset; the adapter appends `/v1/messages`) |
+
+An unknown `provider` is rejected at `ax apply` time with the list of valid
+values. The `parameters` map is passed through to the provider: Gemini-style
+spellings (`maxOutputTokens`, `topP`, `topK`, `stopSequences`) are translated at
+the adapter boundary (`max_tokens`, `top_p`, `top_k`, `stop`/`stop_sequences`)
+and any other key flows through verbatim, so provider-native names also work.
+
+Provider failures are loud: a missing or wrong key, an HTTP error, or an
+unreachable endpoint surfaces as an error carrying the provider's status and
+response body. The platform never substitutes a fabricated completion.
+

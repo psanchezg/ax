@@ -1,0 +1,44 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# A non-Gemini, OpenAI-compatible provider: DeepSeek.
+#
+# `provider: openai` selects the OpenAI-compatible chat-completions adapter, so
+# the same manifest shape covers OpenRouter, Together, Groq, Fireworks, and
+# Baseten. `baseURL` is the endpoint base, verbatim, including the API version
+# prefix.
+#
+# Create the secret first (never commit real keys):
+#
+#   kubectl create secret generic deepseek-api-secret \
+#     --from-literal=DEEPSEEK_API_KEY="<your-key>"
+#
+#   ax apply -f examples/model-deepseek.yaml
+apiVersion: ax.io/v1alpha1
+kind: Model
+metadata:
+  name: deepseek
+  atespace: default
+spec:
+  provider: openai
+  model: deepseek-chat
+  baseURL: https://api.deepseek.com/v1
+  secretKey:
+    name: deepseek-api-secret
+    key: DEEPSEEK_API_KEY
+  parameters:
+    # Gemini-style spellings are translated per provider, so one manifest keeps
+    # working across providers.
+    maxOutputTokens: 8000
+    temperature: 0.2
