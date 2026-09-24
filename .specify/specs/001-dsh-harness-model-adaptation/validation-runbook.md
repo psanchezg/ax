@@ -492,11 +492,18 @@ cacheada: sube la etiqueta (`:test2`) al repetir.
 ### 3.3 Recursos de prueba
 
 ```bash
+# Substrate exige el DIGEST: rechaza un template cuya imagen vaya solo con tag
+# ("must be pinned by digest"), y si el template falla AX cae al default y el
+# error que ves es un confuso "actor template not found".
+DIGEST=$(docker image inspect "$DSH_IMAGE" --format '{{index .RepoDigests 0}}' 2>/dev/null | sed 's/.*@//')
+[ -n "$DIGEST" ] || DIGEST=$(docker push "$DSH_IMAGE" 2>&1 | awk '/digest: sha256/{print $3; exit}')
+echo "imagen pinneada: ${DSH_IMAGE%:*}@$DIGEST"
+
 kubectl create secret generic deepseek-api-secret \
   --from-literal=DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY_SRC"
 
-# Edita la imagen en el ejemplo antes de aplicarlo:
-sed -i '' "s|ghcr.io/<org>/ax-dsh-runner:1|$DSH_IMAGE|" examples/workspace-dsh.yaml
+# Edita la imagen en el ejemplo con el digest, no con el tag:
+sed -i '' "s|ghcr.io/<org>/ax-dsh-runner@sha256:<digest>|${DSH_IMAGE%:*}@$DIGEST|" examples/workspace-dsh.yaml
 
 ./bin/ax apply -f examples/model-deepseek.yaml
 ./bin/ax apply -f examples/workspace-dsh.yaml
