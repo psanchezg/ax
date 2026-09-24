@@ -268,8 +268,8 @@ sed -i '' 's|http://127.0.0.1:18999/v1|https://api.deepseek.com/v1|' "$W/model.y
 Si falla: `MISSING_CREDENTIAL` para **tu** ruta → no exportaste la variable del `Model`;
 error HTTP del proveedor → la clave o el `baseURL`; timeout → endpoint/egress de tu red.
 
-- [ ] 1.4a: DSH responde con una clave real
-- [ ] 1.4b: el stub local recibe la petición (la ruta del `Model` está seleccionada)
+- [X] 1.4a: DSH responde con una clave real
+- [X] 1.4b: el stub local recibe la petición (la ruta del `Model` está seleccionada)
 
 ---
 
@@ -289,6 +289,8 @@ export AX_SERVER=127.0.0.1:18080
 sleep 1
 
 # 1) Validación: un provider con typo debe ser rechazado en apply, no después.
+#    ✅ ESTE PASO PASA CUANDO FALLA. Un "Error: ... unknown provider" aquí es el
+#    criterio de éxito (SC-003), no un problema.
 cat <<'EOF' | ./bin/ax apply -f -
 apiVersion: ax.io/v1alpha1
 kind: Model
@@ -298,7 +300,8 @@ EOF
 # Esperado: salida no-cero, y el mensaje nombra google, openai, anthropic:
 #   Error: applying document 1: rpc error: code = InvalidArgument desc =
 #   invalid model: unknown provider "gemini-flash" (valid providers: anthropic, google, openai)
-# Ojo: ese apply devuelve 1 a propósito; si tu shell tiene `set -e`, envuélvelo en `|| true`.
+# Ojo: ese apply devuelve 1 a propósito; si tu shell tiene `set -e`, envuélvelo en `|| true`
+# o sigue con el paso 2 en una línea aparte.
 
 # 2) Los manifiestos reales deben aceptarse
 ./bin/ax apply -f examples/model-deepseek.yaml
