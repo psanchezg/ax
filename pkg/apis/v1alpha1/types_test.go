@@ -674,3 +674,35 @@ func TestModel_API_RoundTrip(t *testing.T) {
 		t.Errorf("model round trip changed:\n%s", out)
 	}
 }
+
+func TestValidateModel(t *testing.T) {
+	meta := &v1alpha1.ObjectMeta{Name: "m", Atespace: "default"}
+	valid := []*v1alpha1.Model{
+		{Metadata: meta},
+		{Metadata: meta, Spec: &v1alpha1.ModelSpec{}},
+		{Metadata: meta, Spec: &v1alpha1.ModelSpec{Provider: "openai", BaseUrl: "https://api.deepseek.com/v1"}},
+		{Metadata: meta, Spec: &v1alpha1.ModelSpec{Provider: "openai", BaseUrl: "http://vllm.default.svc.cluster.local:8000/v1"}},
+		{Metadata: meta, Spec: &v1alpha1.ModelSpec{SecretKey: &v1alpha1.SecretKeyRef{Name: "s", Key: "DEEPSEEK_API_KEY"}}},
+	}
+	for i, m := range valid {
+		if err := v1alpha1.ValidateModel(m); err != nil {
+			t.Errorf("case %d: expected valid, got %v", i, err)
+		}
+	}
+
+	invalid := []*v1alpha1.Model{
+		nil, // no name to check
+		{},
+		{Metadata: meta, Spec: &v1alpha1.ModelSpec{BaseUrl: "api.deepseek.com/v1"}},
+		{Metadata: meta, Spec: &v1alpha1.ModelSpec{BaseUrl: "ftp://api.deepseek.com"}},
+		{Metadata: meta, Spec: &v1alpha1.ModelSpec{BaseUrl: "https://"}},
+		{Metadata: meta, Spec: &v1alpha1.ModelSpec{SecretKey: &v1alpha1.SecretKeyRef{Key: "not a var"}}},
+		{Metadata: meta, Spec: &v1alpha1.ModelSpec{SecretKey: &v1alpha1.SecretKeyRef{Key: "1LEADING_DIGIT"}}},
+		{Metadata: &v1alpha1.ObjectMeta{Name: "Not-A-Label"}, Spec: &v1alpha1.ModelSpec{}},
+	}
+	for i, m := range invalid {
+		if err := v1alpha1.ValidateModel(m); err == nil {
+			t.Errorf("case %d: expected invalid, got nil", i)
+		}
+	}
+}

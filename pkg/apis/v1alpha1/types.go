@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -298,13 +299,40 @@ func ValidateWorkspace(w *Workspace) error {
 	return nil
 }
 
+// ValidateTask reports the first problem with a task that would make it
+
 // ValidateModel reports the first problem with a model that would make it
-// unusable. It is called by the API server before saving.
+// unusable: its name and atespace, a base URL that is not an absolute http(s)
+// URL, or a secret key name that cannot be an environment variable. Provider
+// membership is validated by the API server against the provider registry,
+// which this package cannot see. It is called before saving.
 func ValidateModel(m *Model) error {
-	return ValidateObjectMeta(m.GetMetadata())
+	if err := ValidateObjectMeta(m.GetMetadata()); err != nil {
+		return err
+	}
+	spec := m.GetSpec()
+	if spec == nil {
+		return nil
+	}
+	if baseURL := spec.GetBaseUrl(); baseURL != "" {
+		parsed, err := url.Parse(baseURL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return fmt.Errorf("spec.baseURL: %q must be an absolute http(s) URL", baseURL)
+		}
+	}
+	key := spec.GetSecretKey().GetKey()
+	if key == "" {
+		return nil
+	}
+	for i, r := range key {
+		valid := r == '_' || ('A' <= r && r <= 'Z') || ('a' <= r && r <= 'z') || (i > 0 && '0' <= r && r <= '9')
+		if !valid {
+			return fmt.Errorf("spec.secretKey.key: %q must be a valid environment variable name", key)
+		}
+	}
+	return nil
 }
 
-// ValidateTask reports the first problem with a task that would make it
 // impossible to run correctly. It is called by the API server before saving.
 func ValidateTask(t *Task) error {
 	if err := ValidateObjectMeta(t.GetMetadata()); err != nil {

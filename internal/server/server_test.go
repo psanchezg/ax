@@ -17,9 +17,11 @@ package server_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -168,7 +170,6 @@ func TestServerGRPC(t *testing.T) {
 	if resTask.Status.Phase != "Running" {
 		t.Errorf("expected task phase to be 'Running', got %q", resTask.Status.Phase)
 	}
-
 
 	// 5. Workspaces
 	ws, err = client.GetWorkspace(ctx, &v1alpha1.GetWorkspaceRequest{Atespace: "default", Name: "grpc-ws"})
@@ -501,5 +502,77 @@ func TestServer_DeleteTask_UpdateStatusError(t *testing.T) {
 	}
 	if rec.deleteCount != 0 {
 		t.Errorf("expected ReconcileDelete not to be called if UpdateTaskStatus fails, got %d calls", rec.deleteCount)
+	}
+}
+
+func TestUpdateModel_ValidatesProvider(t *testing.T) {
+	srv := server.NewServer(memory.NewStore())
+	ctx := context.Background()
+
+	_, err := srv.UpdateModel(ctx, &v1alpha1.UpdateModelRequest{Model: &v1alpha1.Model{
+		Metadata: &v1alpha1.ObjectMeta{Name: "typo"},
+		Spec:     &v1alpha1.ModelSpec{Provider: "gemini-flash", Model: "x"},
+	}})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected InvalidArgument for an unknown provider, got %v", err)
+	}
+	for _, want := range []string{"gemini-flash", "google", "openai", "anthropic"} {
+		if !strings.Contains(status.Convert(err).Message(), want) {
+			t.Errorf("expected the rejection to name %q, got %v", want, err)
+		}
+	}
+
+	// The default (empty) provider and the registered names are accepted. The
+	// name uses the provider lowercased: metadata.name has to be an RFC 1123
+	// label, so an uppercase provider name cannot be spelled there.
+	for i, provider := range []string{"", "google", "openai", "anthropic", "OpenAI"} {
+		_, err := srv.UpdateModel(ctx, &v1alpha1.UpdateModelRequest{Model: &v1alpha1.Model{
+			Metadata: &v1alpha1.ObjectMeta{Name: fmt.Sprintf("ok-%d", i)},
+			Spec:     &v1alpha1.ModelSpec{Provider: provider, Model: "m"},
+		}})
+		if err != nil {
+			t.Errorf("expected provider %q to be accepted, got %v", provider, err)
+		}
+	}
+}
+
+func TestUpdateModel_ValidatesBaseURLAndSecretKey(t *testing.T) {
+	srv := server.NewServer(memory.NewStore())
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+		spec *v1alpha1.ModelSpec
+	}{
+		{"relative base URL", &v1alpha1.ModelSpec{Provider: "openai", BaseUrl: "api.deepseek.com/v1"}},
+		{"non-http scheme", &v1alpha1.ModelSpec{Provider: "openai", BaseUrl: "ftp://api.deepseek.com"}},
+		{"invalid secret key name", &v1alpha1.ModelSpec{
+			Provider:  "openai",
+			SecretKey: &v1alpha1.SecretKeyRef{Name: "s", Key: "not a var"},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := srv.UpdateModel(ctx, &v1alpha1.UpdateModelRequest{Model: &v1alpha1.Model{
+				Metadata: &v1alpha1.ObjectMeta{Name: "bad"},
+				Spec:     tc.spec,
+			}})
+			if status.Code(err) != codes.InvalidArgument {
+				t.Fatalf("expected InvalidArgument, got %v", err)
+			}
+		})
+	}
+
+	_, err := srv.UpdateModel(ctx, &v1alpha1.UpdateModelRequest{Model: &v1alpha1.Model{
+		Metadata: &v1alpha1.ObjectMeta{Name: "deepseek"},
+		Spec: &v1alpha1.ModelSpec{
+			Provider:  "openai",
+			Model:     "deepseek-chat",
+			BaseUrl:   "https://api.deepseek.com/v1",
+			SecretKey: &v1alpha1.SecretKeyRef{Name: "deepseek-api-secret", Key: "DEEPSEEK_API_KEY"},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("expected a valid model to be accepted, got %v", err)
 	}
 }
