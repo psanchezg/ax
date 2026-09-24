@@ -59,9 +59,13 @@ Setup sequence:
    [container-env-contract.md](./container-env-contract.md)). Unresolvable `modelRef` ⇒
    typed error ⇒ not-Ready condition `UnresolvedModelRef`.
 2. **Generate `$DSH_HOME/settings.yaml`** — the ONLY generated artifact in scope
-   (FR-018), the minimal `llm-pi-ai` provider binding derived from the `Model`:
+   (FR-018): the minimal provider binding derived from the `Model`, plus the default
+   selection that makes the agent use it.
 
    ```yaml
+   agent-default-model:            # REQUIRED: registering a route does not select it
+     provider: <model.metadata.name>
+     model: <spec.model>
    llm-pi-ai:
      providers:
        <model.metadata.name>:
@@ -75,6 +79,12 @@ Setup sequence:
            - id: <spec.model>
              name: <spec.model>
    ```
+
+   The shipped profile mounts its own DeepSeek adapter as the default selection, so a
+   provider section alone leaves the agent asking for that route and never reaching the
+   `Model` AX resolved (validation answered `MISSING_CREDENTIAL` for `deepseek-official`).
+   Verified against `@deepseek-ai/dsh` 0.1.5-rc.2: with both sections, DSH calls the
+   `baseURL` from the provider entry with the credential named by `apiKeyEnv`.
 
    No `runtime.patch.yml`, no `agent-presets/`, no `AGENTS.md`, no skills materialization
    (Phase 4).

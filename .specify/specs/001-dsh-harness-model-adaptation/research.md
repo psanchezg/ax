@@ -177,21 +177,29 @@ below. Format: **Decision** / **Rationale** / **Alternatives considered**.
 ## R12. DSH invocation, profile, and model-provider binding
 
 - **Decision**: The `deepseek-harness` implementation:
-  1. writes `$DSH_HOME/settings.yaml` with the minimal `llm-pi-ai.providers` block
-     generated from the bound `Model` (doc §5.5): provider entry named after
-     `Model.metadata.name`, `apiKeyEnv` = `spec.secretKey.key`, `baseURL` = `spec.base_url`,
-     `api` mapped from `ModelSpec.provider` (`openai` → `openai-completions`, `anthropic`
-     → `anthropic-messages`, `google` → `openai-completions` against Gemini's
-     OpenAI-compatible endpoint with base `https://generativelanguage.googleapis.com/v1beta/openai/`),
-     `models[].id` = `spec.model`;
+  1. writes `$DSH_HOME/settings.yaml` with the minimal provider binding generated from
+     the bound `Model` (doc §5.5): a `llm-pi-ai.providers` entry named after
+     `Model.metadata.name` with `apiKeyEnv` = `spec.secretKey.key`, `baseURL` =
+     `spec.base_url`, `api` mapped from `ModelSpec.provider` (`openai` →
+     `openai-completions`, `anthropic` → `anthropic-messages`, `google` →
+     `openai-completions` against Gemini's OpenAI-compatible endpoint with base
+     `https://generativelanguage.googleapis.com/v1beta/openai/`), and `models[].id` =
+     `spec.model`; **plus** an `agent-default-model` section (`provider` = the route,
+     `model` = `spec.model`) that selects it;
   2. runs `dsh --profile headless "<goal>"` as the one-shot headless session
      (goal → prompt contract identical to Antigravity, FR-016);
   3. sets `DSH_HOME=/ax/dsh` (R2), `DSH_PERMISSION_MODE=danger-full-access` (R14), and
      inherits the container environment carrying the Model credential (R9).
-  The profile `headless` (created via `--from-default-profile headless`) is baked at
-  image build time (FR-019). No `--patch`, no `agent-presets/`, no MCP/skills codegen —
-  only the `settings.yaml` binding (FR-018). `harness.command`, when set, replaces argv
-  after `dsh`; `harness.env` is merged into the process environment;
+  **Finding (validation, `@deepseek-ai/dsh` 0.1.5-rc.2)**: the `agent-default-model`
+  section is not optional. `dsh-base` mounts `dsh-llm-deepseek` as the default and
+  `dsh-llm-pi-ai` dormant; the first implementation wrote only the provider section, so
+  the agent asked for the built-in `deepseek-official` route and DSH failed with
+  `MISSING_CREDENTIAL` for its own route. With both sections, DSH resolves the request
+  against `spec.baseURL` with the credential named by `apiKeyEnv` (verified locally
+  against a stub endpoint: DSH POSTs to the configured baseURL, not to its default).
+  The shipped `headless` profile runs as-is (R13). No `--patch`, no `agent-presets/`, no
+  MCP/skills codegen — only the `settings.yaml` binding (FR-018). `harness.command`, when
+  set, replaces argv after `dsh`; `harness.env` is merged into the process environment;
   `harness.systemInstructions` is written to `$DSH_HOME/AGENTS.md`-style override only in
   a later phase — in this feature it is passed via the prompt prefix *(documented
   limitation, see R13)*.

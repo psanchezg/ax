@@ -53,7 +53,7 @@ export DSH_IMAGE="${REGISTRY}/ax-dsh-runner:test1"
 export DEEPSEEK_API_KEY_SRC=...             # tu clave real, solo en el shell
 ```
 
-- [ ] `make build` sin errores
+- [X] `make build` sin errores
 
 ---
 
@@ -72,7 +72,7 @@ inyección de credenciales, dispatcher de harness y el path Antigravity sin toca
 
 Si falla: `go test -count=1 -run <Test> ./<paquete>/... -v`.
 
-- [ ] Suite verde
+- [X] Suite verde
 
 ### 1.2 Los manifiestos del repo siguen siendo válidos
 
@@ -84,7 +84,7 @@ Esperado: PASS para `model-deepseek.yaml`, `model-local-qwen.yaml`, `simple.yaml
 `task-dsh-demo.yaml` (sus 2 documentos) y `task.yaml`. Prueba: ningún ejemplo se ha
 quedado obsoleto respecto al esquema estricto.
 
-- [ ] PASS
+- [X] PASS
 
 ### 1.3 Runner real en local, con harness DSH
 
@@ -142,9 +142,14 @@ cat "$W/dsh/settings.yaml"                                   # → binding llm-p
 kill $RUNNER_PID
 ```
 
-Esperado en `settings.yaml`:
+Esperado en `settings.yaml` (**dos** secciones; la segunda es la que hace que el agente
+use la ruta de la primera, y es fácil de olvidar — su ausencia fue el primer hallazgo de
+esta validación):
 
 ```yaml
+agent-default-model:
+    model: deepseek-chat
+    provider: deepseek
 llm-pi-ai:
     providers:
         deepseek:
@@ -163,26 +168,56 @@ Si falla: `cat "$W/runner.log"`. Un `unsupported harness kind` significa que el 
 está mal escrito; un error de `provider ... has no DeepSeek Harness mapping` viene de un
 provider sin adaptador DSH (`google`/`openai`/`anthropic` son los válidos).
 
-- [ ] `/readyz` responde `ok`
-- [ ] `/metadata/v1alpha1/ax/model` sirve el `Model` sin valor de secreto
-- [ ] `settings.yaml` generado como arriba
-- [ ] El comando de la tarea se ejecutó
+- [X] `/readyz` responde `ok`
+- [X] `/metadata/v1alpha1/ax/model` sirve el `Model` sin valor de secreto
+- [X] `settings.yaml` generado como arriba
+- [X] El comando de la tarea se ejecutó
 
 ### 1.4 El único supuesto externo: el `dsh` real entiende ese `settings.yaml`
 
+Fuera de un clúster nadie inyecta la credencial, así que **exporta tú la variable que
+declara el `Model`** (`secretKey.key`) antes de lanzar DSH:
+
 ```bash
+export DEEPSEEK_API_KEY=...            # el nombre que declara tu Model, no otro
 DSH_HOME=/tmp/ax-runbook/dsh DSH_PERMISSION_MODE=danger-full-access \
   dsh --profile headless "lista los ficheros del workspace y di qué ves"
 ```
 
-Esperado: DSH arranca, resuelve la credencial por `apiKeyEnv`, llama a tu endpoint
-(DeepSeek en el ejemplo) y termina con una respuesta en stdout. Prueba: el formato del
-binding que generamos es correcto y el provider responde.
+Esperado: DSH arranca, resuelve la credencial por `apiKeyEnv`, llama al `baseURL` del
+`Model` y termina con una respuesta en stdout.
 
-Si falla: `MISSING_CREDENTIAL` → exporta `DEEPSEEK_API_KEY` en el shell; error HTTP del
-proveedor → la clave o el `baseURL`; timeout → endpoint/egress de tu red.
+**Cómo probar que de verdad usa *tu* ruta** (sin clave real y sin gastar cuota): apunta el
+`Model` a un servidor local tuyo y comprueba si DSH llama ahí.
 
-- [ ] DSH responde usando el binding generado
+```bash
+# En una terminal: un endpoint falso que registra lo que recibe
+python3 -c "
+import http.server
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        n=int(self.headers.get('Content-Length') or 0); b=self.rfile.read(n)
+        print('REQ', self.path, self.headers.get('Authorization'), b[:80], flush=True)
+        self.send_response(401); self.end_headers(); self.wfile.write(b'{\"error\":\"fake\"}')
+    def log_message(self,*a): pass
+http.server.HTTPServer(('127.0.0.1',18999),H).serve_forever()" &
+
+# En el model.yaml, cambia baseURL por http://127.0.0.1:18999/v1 y regenera settings.yaml
+# (vuelve a ejecutar §1.3), luego:
+DSH_HOME=/tmp/ax-runbook/dsh DEEPSEEK_API_KEY=dummy \
+  dsh --profile headless "di hola"
+```
+
+Esperado: el servidor falso imprime `REQ /v1/chat/completions auth=Bearer dummy ...` y el
+error de DSH viene de *ese* endpoint. Si el servidor no recibe nada y aparece
+`MISSING_CREDENTIAL ... llm-deepseek: no API key for provider route "deepseek-official"`,
+DSH está usando su ruta interna en vez de la del `Model`: comprueba que `settings.yaml`
+tiene la sección `agent-default-model` apuntando a la ruta de `llm-pi-ai`.
+
+Si falla: `MISSING_CREDENTIAL` para **tu** ruta → no exportaste la variable del `Model`;
+error HTTP del proveedor → la clave o el `baseURL`; timeout → endpoint/egress de tu red.
+
+- [ ] DSH llama al `baseURL` del `Model` (no a su ruta interna)
 
 ---
 
