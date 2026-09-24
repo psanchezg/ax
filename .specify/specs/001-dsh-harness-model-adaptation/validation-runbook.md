@@ -452,10 +452,10 @@ KO_DOCKER_REPO=$AX_IMAGE_REPO ko apply --platform=$PLATFORM -f deploy/ax-control
 kubectl get pods -n ax-system
 ```
 
-- [ ] `kubectl config current-context` = `kind-ax-test`
-- [ ] Substrate instalado y su Control API visible en `ate-system`
-- [ ] Pods de `ax-system` en `Running`
-- [ ] La plataforma de las imágenes coincide con la de los nodos
+- [X] `kubectl config current-context` = `kind-ax-test`
+- [X] Substrate instalado y su Control API visible en `ate-system`
+- [X] Pods de `ax-system` en `Running`
+- [X] La plataforma de las imágenes coincide con la de los nodos
 
 ### 3.2 Imagen del runner con DSH
 
