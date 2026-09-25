@@ -578,8 +578,10 @@ echo "imagen pinneada: ${DSH_IMAGE%:*}@$DIGEST"
 kubectl create secret generic deepseek-api-secret \
   --from-literal=DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY_SRC"
 
-# Edita la imagen en el ejemplo con el digest, no con el tag:
-sed -i '' "s|ghcr.io/<org>/ax-dsh-runner@sha256:<digest>|${DSH_IMAGE%:*}@$DIGEST|" examples/workspace-dsh.yaml
+# Edita la imagen en el ejemplo con el digest, no con el tag. El patrón sustituye
+# cualquier digest previo: si no, validarías la imagen anterior creyendo que es la nueva.
+sed -i '' -E "s|^([[:space:]]*image: \").*(\")$|\1${DSH_IMAGE%:*}@${DIGEST}\2|" examples/workspace-dsh.yaml
+grep -n 'image:' examples/workspace-dsh.yaml    # tu repo y el digest recién publicado
 
 ./bin/ax apply -f examples/model-deepseek.yaml
 ./bin/ax apply -f examples/workspace-dsh.yaml
