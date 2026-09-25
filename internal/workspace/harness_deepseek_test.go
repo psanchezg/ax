@@ -124,6 +124,38 @@ func TestDeepSeekHarness_Settings(t *testing.T) {
 			wantBaseURL:  "https://generativelanguage.googleapis.com/v1beta/openai/",
 			wantAPIKeyEn: "GEMINI_API_KEY",
 		},
+		{
+			// The protocol is what the endpoint speaks, not what the provider
+			// family implies: an OpenAI-compatible service that only implements
+			// the Responses API is reachable by declaring it.
+			name: "responses api on an openai-compatible route",
+			spec: &v1alpha1.ModelSpec{
+				Provider:  "openai",
+				Api:       "openai-responses",
+				Model:     "mimo-v2.5-tts",
+				BaseUrl:   "https://api.example.com/v1",
+				SecretKey: &v1alpha1.SecretKeyRef{Name: "example-secret", Key: "EXAMPLE_API_KEY"},
+			},
+			wantAPI:      "openai-responses",
+			wantBaseURL:  "https://api.example.com/v1",
+			wantAPIKeyEn: "EXAMPLE_API_KEY",
+		},
+		{
+			// Same idea in the other direction: keep the provider family the
+			// credential belongs to and speak the Messages protocol through a
+			// compatible gateway.
+			name: "anthropic protocol over an openai-compatible family",
+			spec: &v1alpha1.ModelSpec{
+				Provider:  "openai",
+				Api:       "anthropic-messages",
+				Model:     "some-model",
+				BaseUrl:   "https://gateway.example.com",
+				SecretKey: &v1alpha1.SecretKeyRef{Name: "gateway-secret", Key: "GATEWAY_API_KEY"},
+			},
+			wantAPI:      "anthropic-messages",
+			wantBaseURL:  "https://gateway.example.com",
+			wantAPIKeyEn: "GATEWAY_API_KEY",
+		},
 	}
 
 	for _, tt := range tests {
