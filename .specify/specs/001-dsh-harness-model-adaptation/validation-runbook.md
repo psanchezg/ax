@@ -16,7 +16,7 @@ al sitio correcto. Marca los checkboxes conforme avances.
 | 1 — plano de control sin clúster | ✅ verificado |
 | 2 — sandbox real (Kubernetes + Substrate) | **parcial**: AX reconcilia la tarea, inyecta la credencial del `Model`, escribe `settings.yaml` y sirve `/metadata/v1alpha1/ax/model` dentro del sandbox. La imagen del runner ya **arranca DSH** (el árbol de plugins carga y la petición sale al endpoint, verificado dentro de la imagen publicada y en el sandbox), así que lo que queda es responder un goal con una credencial real |
 
-Tres cosas que aprendimos ejecutándolo y que corrigen supuestos previos:
+Cuatro cosas que aprendimos ejecutándolo y que corrigen supuestos previos:
 
 1. **`harness.image` debe ir pinneado por digest.** Substrate rechaza un `ActorTemplate`
    cuya imagen vaya solo con tag (`must be pinned by digest`), y como AX cae entonces al
@@ -26,6 +26,12 @@ Tres cosas que aprendimos ejecutándolo y que corrigen supuestos previos:
    aísla el sandbox (kernel gVisor: el actor no escapa, no ve el host ni otros actores),
    pero no restringe el rootfs del actor. El criterio SC-007 debe leerse como «no puede
    escapar del sandbox», no como «solo escribe en `/workspace`» (§3.4, comprobación 4).
+4. **`Running` no significa que el agente siga trabajando.** AX no propaga el código de
+   salida del comando de la tarea: si `dsh` muere —por ejemplo con
+   `AUTH: 401 ... api key is invalid`—, el `Task` se queda en `Running` y el actor sin
+   proceso. Para saber si sigue vivo:
+   `./bin/ax ssh <task> -- ps -eo pid,args | grep "[d]sh"`. Anotado como mejora de AX, no
+   como parte de esta feature.
 
 ## 0. Preparación
 
