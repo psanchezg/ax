@@ -17,12 +17,15 @@ Persisted in the store; consumed by `internal/server` (validation), `internal/mo
 | `spec.provider` | string | Registry key, lowercase (`google`, `openai`, `anthropic`); empty ≡ `google`. Validated at apply time (FR-007). |
 | `spec.model` | string | Model id, free-form (e.g. `deepseek-chat`). |
 | `spec.baseURL` | string (new) | Endpoint base, scheme+host+port+optional `/v1` prefix, verbatim. `ModelSpec.base_url = 8`, `json_name = "baseURL"` (R8). Empty ≡ provider default endpoint. |
+| `spec.api` | string (new) | Wire protocol the endpoint speaks: `openai-completions`, `openai-responses`, `anthropic-messages`, `google-generate-content`. `ModelSpec.api = 9` (R19). Empty ≡ provider default. The adapter that shapes requests, and the `api` DSH is configured with, follow this field — not the provider family. |
 | `spec.secretKey` | `{name, key}` | Kubernetes secret reference; `key` is the env var name injected into task containers (FR-008). Absent/omitted ⇒ credential-less endpoint (local models). |
-| `spec.parameters` | Struct (free-form) | Pass-through generation parameters; Gemini spellings translated per adapter (R5). No schema validation (spec Assumptions). |
+| `spec.parameters` | Struct (free-form) | Pass-through generation parameters; spellings translated per protocol (R5). No schema validation (spec Assumptions). |
 
 **Validation rules**
 - `provider` MUST be a registered provider name (case-insensitive) or empty → `google`;
   otherwise `UpdateModel` rejects with the valid-name list (SC-003).
+- `api`, when set, MUST be one of the known protocols; rejection at apply time with the
+  list of valid values (R19). Any provider family may be paired with any protocol.
 - `baseURL`, when set, MUST parse as an `http(s)` URL; rejection at apply time with a
   typed error.
 - `secretKey.key`, when set, MUST be a valid environment variable name (the container

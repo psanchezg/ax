@@ -325,3 +325,31 @@ below. Format: **Decision** / **Rationale** / **Alternatives considered**.
 - `DSH_HOME` retention/size policy: out of scope, documented limitation (R2).
 - `TaskStatus.UsageStats`: remains unpopulated (roadmap).
 - No `NEEDS CLARIFICATION` remains open.
+
+## R19. Provider family vs wire protocol (`ModelSpec.api`)
+
+- **Decision**: `spec.provider` names the family (default protocol, credential
+  conventions, docs), and a new additive `spec.api` names the protocol the endpoint
+  actually speaks: `openai-completions`, `openai-responses`, `anthropic-messages`, or
+  `google-generate-content`. Unset means the provider default, so existing manifests are
+  unchanged. The adapter that shapes a request follows the **protocol**, and DSH's
+  `llm-pi-ai` `api` is written from it.
+- **Rationale**: the two concepts genuinely differ, and users hit both cases: an
+  OpenAI-compatible service that only implements the Responses API, and a gateway that
+  speaks the Anthropic Messages protocol in front of another vendor. Deriving the
+  protocol from the provider name made both inexpressible (R12's mapping table had three
+  rows and no way to reach the third pi-ai protocol).
+- **Control-plane gap, deliberate**: AX's own workspace planner implements the chat and
+  Gemini protocols but not `openai-responses`; a Model that declares it gets a typed
+  error naming the protocol instead of a request sent to the wrong endpoint. The planner
+  is not on the runtime path, so this does not constrain the agent harness.
+- **Verified against the real CLI** (`@deepseek-ai/dsh` 0.1.5-rc.2, stub endpoint, dummy
+  key): `api: openai-responses` produced `POST /v1/responses` with
+  `{"model":…,"input":[…]}`; `api: anthropic-messages` (with `provider: openai`, i.e. the
+  family the credential belongs to) produced `POST /v1/messages` with `x-api-key`. Both
+  carried the credential named by `apiKeyEnv`.
+- **Alternatives considered**: extra provider names mapped to the other protocols
+  (rejected: conflates family with protocol and bloats the provider registry, which is
+  also what `ax apply` validates); implementing the Responses adapter in the control
+  plane now (rejected: the planner has no production caller yet — YAGNI — and it would
+  gate the harness on unrelated work).

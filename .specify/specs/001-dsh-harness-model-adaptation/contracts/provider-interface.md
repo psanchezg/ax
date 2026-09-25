@@ -107,6 +107,27 @@ verbatim. Gemini spellings keep working against any provider.
 | `candidateCount` | `candidateCount` | `n` | *(unsupported — typed error)* |
 | anything else | verbatim | verbatim | verbatim |
 
+## Wire protocol (`ModelSpec.api`, R19)
+
+The protocol an endpoint speaks is declared on the `Model`, independently of the
+provider family:
+
+| `Model.spec.api` | Control-plane adapter | DSH `api` |
+|---|---|---|
+| `openai-completions` (default for `openai`) | `openai` | `openai-completions` |
+| `openai-responses` | *none yet* — typed error naming the protocol | `openai-responses` |
+| `anthropic-messages` (default for `anthropic`) | `anthropic` | `anthropic-messages` |
+| `google-generate-content` (default for `google`) | `google` | `openai-completions` (Gemini's compat surface, R18) |
+
+`ResolveAPI(provider, api)` returns the explicit protocol or the provider default;
+`ValidateAPI(api)` rejects an unknown value at apply time; `adapterForAPI(protocol)`
+maps a protocol onto the adapter that implements it and reports whether this build has
+one, so an unsupported protocol fails closed with a typed error instead of reaching the
+wrong endpoint. Parameter translation follows the protocol, not the provider name.
+
+Verified with the real CLI (stub endpoint, dummy key): `openai-responses` →
+`POST /v1/responses`, `anthropic-messages` → `POST /v1/messages` with `x-api-key`.
+
 ## Registry ↔ apply-time validation (FR-007)
 
 `internal/server.UpdateModel` MUST call `model.Known()` semantics: `spec.provider`
