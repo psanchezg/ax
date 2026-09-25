@@ -380,6 +380,7 @@ Cleanup:
 
 ```bash
 kill $SERVER_PID; docker stop ax-runbook-redis
+unset AX_SERVER     # or level 2 keeps dialling this dead local server (see §3.3)
 ```
 
 - [X] Provider with a typo rejected, naming the valid ones
@@ -630,6 +631,15 @@ grep -n 'image:' examples/workspace-dsh.yaml    # your repo and the freshly publ
 
 Expected: the `Task` goes through `Running` and DSH answers the goal. If you use a hardened
 `Gateway`, add `api.deepseek.com:443` to its allowlist (`*:443` by default).
+
+> **If the first `apply` fails with `dial tcp 127.0.0.1:18080: connect: connection refused`**,
+> `AX_SERVER` is still exported from level 1 (§2) and `bin/ax` is talking to the local
+> `ax-server` you killed in that level's cleanup. An explicit `AX_SERVER` (or `--server`)
+> always wins over the kube context, with no health check and no fallback
+> (`internal/tunnel/tunnel.go`). `unset AX_SERVER`: then `bin/ax` resolves `svc/ax-server` in
+> `ax-system` from the active context and keeps a background `kubectl port-forward` for you
+> (state in `~/.ax/tunnels`, managed with `./bin/ax tunnel list|stop`). Check the server is
+> actually up with `kubectl get pods -n ax-system` before blaming the tunnel.
 
 - [X] `Task` reaches `Running`
 - [X] The `Task` completes and DSH prints its final message on the container's stdout
