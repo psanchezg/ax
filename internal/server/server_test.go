@@ -317,6 +317,7 @@ func TestUpdateModel_ValidatesBaseURLAndSecretKey(t *testing.T) {
 	}{
 		{"relative base URL", &v1alpha1.ModelSpec{Provider: "openai", BaseUrl: "api.deepseek.com/v1"}},
 		{"non-http scheme", &v1alpha1.ModelSpec{Provider: "openai", BaseUrl: "ftp://api.deepseek.com"}},
+		{"unknown api", &v1alpha1.ModelSpec{Provider: "openai", Api: "openai-chat"}},
 		{"invalid secret key name", &v1alpha1.ModelSpec{
 			Provider:  "openai",
 			SecretKey: &v1alpha1.SecretKeyRef{Name: "s", Key: "not a var"},

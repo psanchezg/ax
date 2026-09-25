@@ -343,6 +343,11 @@ func (s *Server) UpdateModel(ctx context.Context, req *v1alpha1.UpdateModelReque
 	if err := model.ValidateProvider(req.Model.GetSpec().GetProvider()); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid model: %v", err)
 	}
+	// The same for the wire protocol, which is declared separately so a provider
+	// family can be paired with another protocol.
+	if err := model.ValidateAPI(req.Model.GetSpec().GetApi()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid model: %v", err)
+	}
 	if err := v1alpha1.ValidateModel(req.Model); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid model: %v", err)
 	}
