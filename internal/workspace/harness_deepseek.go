@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/google/ax/internal/model"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 	"gopkg.in/yaml.v3"
 )
@@ -137,17 +138,23 @@ func BoundModel() *v1alpha1.Model {
 
 // dshSettings renders the llm-pi-ai provider binding for a bound Model
 // (docs/deepseek-harness-adaptation.md §5.5): one provider entry named after the
-// Model, the credential variable DSH resolves from the environment, the API
-// protocol that matches AX's provider adapter, the endpoint, and the model id.
+// Model, the credential variable DSH resolves from the environment, the wire
+// protocol the endpoint speaks, the endpoint, and the model id.
 func dshSettings(m *v1alpha1.Model) ([]byte, error) {
-	provider := strings.ToLower(strings.TrimSpace(m.GetSpec().GetProvider()))
-	api, err := dshAPI(provider)
+	// The Model declares the protocol; when it does not, the provider decides.
+	protocol, err := model.ResolveAPI(m.GetSpec().GetProvider(), m.GetSpec().GetApi())
+	if err != nil {
+		return nil, err
+	}
+	api, err := dshAPI(protocol)
 	if err != nil {
 		return nil, err
 	}
 
 	baseURL := m.GetSpec().GetBaseUrl()
-	if baseURL == "" && (provider == "" || provider == "google") {
+	if baseURL == "" && protocol == model.APIGoogleGenerateContent {
+		// Gemini is reached through its OpenAI-compatible surface, which lives at
+		// a different base than the native generateContent API.
 		baseURL = dshDefaultGoogleBaseURL
 	}
 
@@ -187,15 +194,20 @@ func dshSettings(m *v1alpha1.Model) ([]byte, error) {
 	return out, nil
 }
 
-// dshAPI maps an AX provider name onto the dsh-llm-pi-ai protocol that speaks
-// it. Gemini is reached through its OpenAI-compatible surface.
-func dshAPI(provider string) (string, error) {
-	switch provider {
-	case "", "google", "openai":
+// dshAPI maps a Model's wire protocol onto the dsh-llm-pi-ai protocol that
+// implements it. The three chat protocols map one to one; Gemini has no native
+// pi-ai route, so it goes through its OpenAI-compatible surface (R18).
+func dshAPI(protocol string) (string, error) {
+	switch protocol {
+	case model.APIOpenAICompletions:
 		return "openai-completions", nil
-	case "anthropic":
+	case model.APIOpenAIResponses:
+		return "openai-responses", nil
+	case model.APIAnthropicMessages:
 		return "anthropic-messages", nil
+	case model.APIGoogleGenerateContent:
+		return "openai-completions", nil
 	default:
-		return "", fmt.Errorf("provider %q has no DeepSeek Harness mapping", provider)
+		return "", fmt.Errorf("protocol %q has no DeepSeek Harness mapping", protocol)
 	}
 }
