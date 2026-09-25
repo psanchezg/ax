@@ -591,26 +591,170 @@ Esperado: el `Task` pasa por `Running` y el goal lo responde DSH. Si usas un `Ga
 endurecido, añade `api.deepseek.com:443` a su allowlist (por defecto `*:443`).
 
 - [X] `Task` alcanza `Running`
-- [ ] El `Task` llega a completarse y DSH imprime su mensaje final en stdout del contenedor
+- [X] El `Task` llega a completarse y DSH imprime su mensaje final en stdout del contenedor
       (`./bin/ax ssh dsh-goal -- ps aux | grep dsh` lo confirma en vivo)
 
 ### 3.4 Las seis comprobaciones que importan
 
-| # | Comando | Esperado |
+| # | Criterio | Procedimiento |
 |---|---|---|
-| 1 | `./bin/ax ssh dsh-goal -- ls -l /ax/dsh` | `settings.yaml` con el binding del `Model`; DSH arrancó contra tu endpoint |
-| 2 | `./bin/ax ssh dsh-goal -- env \| grep -E 'DEEPSEEK_API_KEY\|AX_MODEL_BASE_URL'` | la credencial bajo el nombre declarado y el endpoint |
-| 3 | `./bin/ax ssh dsh-goal -- curl -s http://127.0.0.1:80/metadata/v1alpha1/ax/model` | el `Model`, sin valor de secreto |
-| 4 | `./bin/ax ssh dsh-goal -- sh -c 'echo x > /etc/x; echo exit=$?'` | **`exit=0`, y el fichero existe**: el sandbox **no** hace el rootfs de solo lectura. Lo que Substrate garantiza es que el actor no escapa del sandbox (no ve el host ni otros actores); `/workspace` es la superficie **durable** que sobrevive a suspender/reanudar |
-| 5 | Aplica un workspace **sin** `harness` y ejecuta su tarea | comportamiento Antigravity idéntico al de antes |
-| 6 | Rota la clave (`kubectl create secret ... --dry-run=client -o yaml \| kubectl apply -f -`) y reprovisiona | el nuevo valor aparece en el contenedor, sin tocar código ni manifiestos |
+| 1 | `settings.yaml` con el binding del `Model` | §3.4.1 |
+| 2 | credencial y endpoint en el entorno del actor | §3.4.2 |
+| 3 | `/metadata/v1alpha1/ax/model` desde dentro | §3.4.3 |
+| 4 | aislamiento del sandbox (SC-007) | §3.4.4 |
+| 5 | camino sin `harness` intacto (SC-005, SC-009) | §3.4.5 |
+| 6 | rotación de clave sin cambios (SC-004) | §3.4.6 |
 
-- [ ] 1 · `settings.yaml` dentro del sandbox
-- [ ] 2 · credencial y endpoint en el entorno
-- [ ] 3 · ruta `/model` accesible desde dentro
-- [ ] 4 · el actor no escapa del sandbox (comprueba que no alcanza el host ni otros actores; **no** que `/etc` sea de solo lectura)
-- [ ] 5 · path Antigravity intacto
-- [ ] 6 · rotación de clave sin cambios
+Dos precondiciones que no son de esta feature pero bloquean cualquier `Task` nuevo (y por
+tanto las comprobaciones 5 y 6):
+
+- **Un worker libre.** Cada `Task` en `Running` ocupa un worker del pool (§3.1) y el pool
+  tiene dos. Con el pool lleno el task nuevo no arranca y la condición dice:
+  `Ready False ActorResumeFailed ... rpc error: code = ResourceExhausted desc = no free workers available`.
+  Libera uno antes: `./bin/ax delete task dsh-e2e` (o el que no estés usando). Un task que
+  quedó en `Failed` no se recupera con otro `apply`: hay que borrarlo y volver a aplicarlo.
+- **Una imagen que el nodo pueda tirar.** `examples/simple.yaml` y `examples/task.yaml`
+  usan `gcr.io/ax-substrate/ate-images/...`, que es privada; el actor muere al crear el
+  bundle con
+  `DENIED: Unauthenticated request ... artifactregistry.repositories.downloadArtifacts`.
+  Para un task nuevo usa la imagen del §3.2 (registry local) o un runner plano en tu
+  propio registry.
+
+#### 3.4.1 · `settings.yaml` dentro del sandbox
+
+```bash
+./bin/ax ssh dsh-goal -- ls -l /ax/dsh
+./bin/ax ssh dsh-goal -- cat /ax/dsh/settings.yaml
+```
+
+Esperado: `settings.yaml` (y `profiles/`, `sessions/`, `storages/`, que DSH crea en su
+primer arranque) con las **dos** secciones que escribe el harness:
+`llm-pi-ai.providers.<modelo>` con `api`, `apiKeyEnv`, `baseURL` y `models`, y
+`agent-default-model` apuntando a ese proveedor. Si falta la segunda, DSH tira de su ruta
+interna y el síntoma es `MISSING_CREDENTIAL`.
+
+#### 3.4.2 · Credencial y endpoint en el entorno del actor
+
+```bash
+./bin/ax ssh dsh-goal -- sh -c 'env | grep -E "^(DEEPSEEK_API_KEY|AX_MODEL_BASE_URL|DSH_HOME|DSH_PERMISSION_MODE)=" | sed "s/=\(.\{4\}\).*/=\1.../"'
+```
+
+Esperado: la credencial **bajo el nombre que declara el `Model`** (`DEEPSEEK_API_KEY` aquí),
+`AX_MODEL_BASE_URL` con el endpoint, `DSH_HOME=/ax/dsh` y
+`DSH_PERMISSION_MODE=danger-full-access`. El `sed` recorta el valor a cuatro caracteres:
+no imprimas claves en el registro de la validación.
+
+#### 3.4.3 · La ruta de metadata, desde dentro
+
+```bash
+./bin/ax ssh dsh-goal -- curl -s http://127.0.0.1:80/metadata/v1alpha1/ax/model
+```
+
+Esperado: el `Model` completo, con `secretKey.name` y `secretKey.key` pero **sin el valor**
+del secreto. Tanto `ax ssh` como esa ruta dependen de `debug: true` en el `Task` (el
+ejemplo ya lo trae); sin él, el runner no sirve los servicios de invitado.
+
+#### 3.4.4 · Aislamiento (SC-007): el actor no escapa del sandbox
+
+```bash
+./bin/ax ssh dsh-goal -- uname -r
+kubectl get node -o jsonpath='{.items[0].status.nodeInfo.kernelVersion}'; echo
+./bin/ax ssh dsh-goal -- sh -c 'echo x > /etc/x; echo exit=$?; ls -l /etc/x'
+./bin/ax ssh dsh-goal -- mount | grep -E " / |workspace"
+```
+
+Esperado, y cómo se lee:
+
+| Comando | Salida medida aquí | Qué significa |
+|---|---|---|
+| `uname -r` en el actor | `4.19.0-gvisor` | el actor trae **su propio kernel**, gVisor |
+| kernel del nodo | `7.0.12-linuxkit` | no comparten kernel: no es «otro contenedor» y no hay escape al host |
+| escritura en `/etc` | `exit=0` y el fichero existe | el rootfs **no** es de solo lectura |
+| `mount` | `/` como overlay `rw`, `/workspace` como `9p` | `/workspace` es la superficie **durable** (sobrevive a suspender/reanudar) |
+
+Ojo con la lectura: esta comprobación **no** demuestra que el agente solo escriba en
+`/workspace`; demuestra lo contrario. SC-007 pide que el actor no alcance el host ni a otros
+actores, y eso lo aporta Substrate (gVisor más sus políticas), con el kernel distinto como
+evidencia visible. La promesa fuerte («solo escribe en `/workspace`») sería
+`readOnlyRootFilesystem` en el `ActorTemplate`, y es la mejora anotada al final de §3.4.
+
+#### 3.4.5 · Un task sin `harness` no activa nada nuevo (SC-005, SC-009)
+
+La costura es *opt-in*, y esto es lo que hay que ver en el código: `ResolveHarness("")`
+devuelve el harness **Antigravity** (el de siempre), `HarnessImage(workspaces)` devuelve
+`""` cuando ningún workspace declara `harness.image` (así el task conserva su `spec.image`)
+y, sin `Model` enlazado, la credencial sigue saliendo por la rama legacy
+(`GEMINI_API_KEY`, de `gemini-api-secret` o del entorno del controller).
+
+```bash
+cat > /tmp/plain-task.yaml <<EOF
+apiVersion: ax.io/v1alpha1
+kind: Task
+metadata: {name: plain-task, atespace: default}
+spec:
+  # La imagen del §3.2 (la que el nodo sí puede tirar) pero SIN bloque harness:
+  # lo que se comprueba es que AX no activa nada del camino nuevo.
+  image: "${DSH_IMAGE%:*}@${DIGEST}"
+  command: ["sh", "-c", "env | grep -E '^(AX_MODEL|GEMINI|DEEPSEEK)' || echo 'sin variables de modelo'; ls /ax/dsh/settings.yaml 2>/dev/null || echo 'no existe'"]
+  debug: true
+EOF
+
+./bin/ax apply -f /tmp/plain-task.yaml
+./bin/ax get task plain-task
+./bin/ax ssh plain-task -- sh -c 'env | grep -E "^(AX_MODEL|GEMINI|DEEPSEEK)" || echo "sin variables de modelo"; ls /ax/dsh/settings.yaml 2>/dev/null || echo "no existe"'
+./bin/ax delete task plain-task
+```
+
+Esperado: el task llega a `Running` y dentro sale `sin variables de modelo` y `no existe`:
+sin bloque `harness` no hay `settings.yaml`, ni credencial de modelo, ni imagen sustituida.
+La imagen se nombra a propósito (la de los ejemplos no se puede tirar): lo que se comprueba
+es que AX no toca nada, no qué lleva la imagen.
+
+El camino Antigravity puro (con `goal` y su bootstrap) y la rama legacy de Gemini los cubre
+además la suite: `TestRun_SetsUpEveryWorkspace` y los tests del reconciler. Para
+ejercitarlos en el clúster con clave real: `examples/task.yaml` más un secreto
+`gemini-api-secret` con tu clave de Gemini.
+
+#### 3.4.6 · Rotación de clave (SC-004)
+
+```bash
+# 0. la clave nueva, solo en este shell
+export NEW=...   # nunca en un manifiesto ni en el historial del shell
+
+# 1. rota el secreto con el valor
+kubectl create secret generic deepseek-api-secret \
+  --from-literal=DEEPSEEK_API_KEY="$NEW" --dry-run=client -o yaml | kubectl apply -f -
+
+# 2. huellas para comparar sin imprimir la clave: la del secreto y la de dentro del actor
+#    (`shasum -a 256` en macOS; `sha256sum` en Linux)
+kubectl get secret deepseek-api-secret -o jsonpath='{.data.DEEPSEEK_API_KEY}' | base64 -d | shasum -a 256 | cut -c1-8
+./bin/ax ssh dsh-goal -- sh -c 'printf %s "$DEEPSEEK_API_KEY" | sha256sum | cut -c1-8'
+
+# 3. reprovisiona el actor: borrar el task y volver a aplicarlo
+./bin/ax delete task dsh-goal && ./bin/ax apply -f examples/workspace-dsh.yaml
+for i in $(seq 1 30); do ./bin/ax get tasks | grep -q "dsh-goal.*Running" && break; sleep 5; done
+
+# 4. repite la huella del actor: ahora coincide con la del secreto nuevo
+./bin/ax ssh dsh-goal -- sh -c 'printf %s "$DEEPSEEK_API_KEY" | sha256sum | cut -c1-8'
+```
+
+Esperado: tras el paso 1 el actor **sigue con el valor viejo** —es correcto, no es un
+fallo—, y tras el paso 3 su huella es la del secreto nuevo, sin tocar código ni
+manifiestos. Eso es lo que pide SC-004.
+
+Por qué hay que recrear el actor: el worker consume **eventos de task** (Redis), no cambios
+de secreto, así que rotar el secreto por sí solo no dispara nada; y `EnsureActor`, ante
+`AlreadyExists`, devuelve el actor existente **sin actualizar su template**. Como el nombre
+del template se deriva de `sha256(imagen + entorno)` (`taskTemplateName`), la rotación crea
+un template nuevo al que solo apunta un actor nuevo. Alternativa a borrar el task: si el
+actor *crashea*, el siguiente reconcile lo recrea con el template nuevo.
+
+- [X] 1 · `settings.yaml` dentro del sandbox
+- [X] 2 · credencial y endpoint en el entorno
+- [X] 3 · ruta `/model` accesible desde dentro
+- [ ] 4 · el actor no escapa del sandbox (kernel gVisor distinto del nodo; **no** que `/etc` sea de solo lectura)
+- [ ] 5 · sin `harness` no se activa nada nuevo (ni settings, ni credencial de modelo, ni imagen sustituida)
+- [ ] 6 · rotación de clave recreando el actor, sin cambios en código ni manifiestos
 
 > **Mejora anotada (no incluida).** Restringir el rootfs del actor (por ejemplo
 > `readOnlyRootFilesystem` en el `ActorTemplate` que construye AX) haría cierta la promesa
