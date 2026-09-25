@@ -17,7 +17,7 @@ FROM node:22-slim
 # Pin the DeepSeek Harness CLI. The shipped `headless` profile initializes from
 # the package's own templates on first use, so first boot needs no registry
 # egress and no profile has to be baked into the image.
-ARG DSH_VERSION=0.1.5-rc.2
+ARG DSH_VERSION=0.1.5-rc.3
 
 # The task runner is a cross-compiled Go binary, so the COPY below has to take the
 # build that matches the image platform: an arm64 node cannot run an amd64 binary.
@@ -37,34 +37,65 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     && rm -rf /var/lib/apt/lists/*
 
-# Install the CLI as a pinned project instead of a global package.
+# Install the CLI as a global package in its own prefix.
 #
-# Two failure modes come from letting npm resolve this tree freely, and both show up
-# only at boot inside a task:
-#   * a global install drops @deepseek-ai/dsh-sandbox-local on a peer conflict, and
-#     dsh dies with "plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local";
-#   * a caret range pulls dsh-base@0.1.5-rc.3 while the CLI is 0.1.5-rc.2, and npm
-#     nests a second (identical) copy of the plugin under dsh-base, so the loader
-#     imports it twice and dies with "Duplicate type name 'DSH_STARTUPINFOW'".
-# The override pins the bundle to the CLI's version, and dropping the nested duplicate
-# reproduces the layout of a working install: one copy hoisted next to the CLI, which
-# the nested dependent still resolves through its parent chain. The assertions below
-# fail the build rather than a task.
+# A project-style install (`npm install @deepseek-ai/dsh`) does not produce a
+# runnable tree: it hoists the CLI's plugins to the project root and nests a
+# second, full copy of the whole closure under dsh-base, so the plugin loader
+# imports the same plugin twice and dies at boot with
+# "Duplicate type name 'DSH_STARTUPINFOW'". A global install instead hoists the
+# bundle flat into the CLI's own node_modules, the layout of a working install.
+#
+# npm then drops exactly one plugin, @deepseek-ai/dsh-sandbox-local, which loses
+# a peer conflict and makes dsh die with "plugin(s) failed to load:
+# @deepseek-ai/dsh-sandbox-local"; naming it explicitly puts it back. A few
+# transitive packages may still end up duplicated, which is reported below but
+# does not stop dsh. Because the real regression only appears at boot inside a
+# task, the build boots the CLI once against a closed port and requires it to get
+# past the plugin tree.
 RUN set -eu; \
-    mkdir -p /opt/dsh; \
-    cd /opt/dsh; \
-    npm init -y > /dev/null; \
-    npm pkg set "overrides.@deepseek-ai/dsh-base=${DSH_VERSION}" > /dev/null; \
-    npm install --no-audit --no-fund --save-exact "@deepseek-ai/dsh@${DSH_VERSION}" > /dev/null; \
-    npm dedupe > /dev/null; \
-    rm -rf /opt/dsh/node_modules/@deepseek-ai/dsh-base/node_modules/@deepseek-ai/dsh-sandbox-local; \
-    ln -sf /opt/dsh/node_modules/.bin/dsh /usr/local/bin/dsh; \
+    npm install --global --prefix /opt/dsh --no-audit --no-fund \
+        "@deepseek-ai/dsh@${DSH_VERSION}" \
+        "@deepseek-ai/dsh-sandbox-local@${DSH_VERSION}" > /dev/null; \
+    ln -sf /opt/dsh/bin/dsh /usr/local/bin/dsh; \
     rm -rf /root/.npm; \
     dsh --version; \
-    count="$(find /opt/dsh/node_modules -name dsh-sandbox-local -type d | wc -l | tr -d ' ')"; \
-    test "$count" = "1" || { echo "expected exactly 1 dsh-sandbox-local, found $count" >&2; exit 1; }; \
-    base="$(find /opt/dsh/node_modules -path '*dsh-base/package.json' | head -1)"; \
-    grep -q "\"version\": \"${DSH_VERSION}\"" "$base" || { echo "dsh-base at $base does not match ${DSH_VERSION}" >&2; exit 1; }
+    find /opt/dsh/lib/node_modules -type f -name package.json \
+        | while read -r pj; do d="$(dirname "$pj")"; \
+            if [ "$(basename "$(dirname "$d")")" = "@deepseek-ai" ]; then printf '%s\n' "$d"; fi; \
+          done | sort > /tmp/dsh-plugins; \
+    dups="$(while read -r d; do basename "$d"; done < /tmp/dsh-plugins | sort | uniq -d | tr '\n' ' ')"; \
+    test -z "$dups" || echo "note: npm installed more than one copy of: $dups"; \
+    offversion="$(while read -r d; do \
+            case "$(basename "$d")" in dsh-*) ;; *) continue ;; esac; \
+            grep -q "\"version\": \"${DSH_VERSION}\"" "$d/package.json" || \
+              printf '%s=%s ' "$(basename "$d")" \
+                "$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$d/package.json" | head -1)"; \
+          done < /tmp/dsh-plugins)"; \
+    test -z "$offversion" || { echo "plugins off ${DSH_VERSION}: $offversion" >&2; exit 1; }; \
+    mkdir -p /tmp/dsh-smoke; \
+    { echo 'llm-pi-ai:'; \
+      echo '  providers:'; \
+      echo '    smoke:'; \
+      echo '      api: openai-completions'; \
+      echo '      models:'; \
+      echo '        - id: smoke'; \
+      echo '          name: smoke'; \
+      echo '      apiKeyEnv: SMOKE_KEY'; \
+      echo '      baseURL: http://127.0.0.1:1/v1'; \
+      echo 'agent-default-model:'; \
+      echo '  provider: smoke'; \
+      echo '  model: smoke'; \
+    } > /tmp/dsh-smoke/settings.yaml; \
+    smoke="$(DSH_HOME=/tmp/dsh-smoke DSH_PERMISSION_MODE=danger-full-access SMOKE_KEY=dummy \
+        timeout 90 dsh --profile headless "reply with ok" 2>&1 || true)"; \
+    case "$smoke" in \
+      *"plugin tree failed to load"*|*"Duplicate type name"*|*"plugin(s) failed to load"*) \
+        echo "the dsh plugin tree does not load:" >&2; echo "$smoke" >&2; exit 1 ;; \
+      *TRANSPORT*|*CONNECTION*|*AUTH*) echo "dsh boots and reaches the provider" ;; \
+      *) echo "unexpected dsh smoke result:" >&2; echo "$smoke" >&2; exit 1 ;; \
+    esac; \
+    rm -rf /tmp/dsh-smoke
 
 # DSH keeps profiles and session state under $DSH_HOME, which the runner points
 # at the durable AX volume so /workspace stays the agent's only file surface.
