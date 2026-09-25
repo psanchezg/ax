@@ -63,11 +63,13 @@ type Config struct {
 	// model API, for example temperature or maxOutputTokens for Gemini. A
 	// systemInstruction entry is sent as the system instruction rather than as a
 	// generation parameter.
-	Parameters    map[string]any `json:"parameters,omitempty" yaml:"parameters,omitempty"`
-	SecretKey     *SecretKeyRef  `json:"secretKey,omitempty" yaml:"secretKey,omitempty"`
-	APIKey        string         `json:"apiKey,omitempty" yaml:"apiKey,omitempty"`
-	BaseURL       string         `json:"baseURL,omitempty" yaml:"baseURL,omitempty"`
-	DisableRemote bool           `json:"disableRemote,omitempty" yaml:"disableRemote,omitempty"`
+	Parameters map[string]any `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+	SecretKey  *SecretKeyRef  `json:"secretKey,omitempty" yaml:"secretKey,omitempty"`
+	APIKey     string         `json:"apiKey,omitempty" yaml:"apiKey,omitempty"`
+	BaseURL    string         `json:"baseURL,omitempty" yaml:"baseURL,omitempty"`
+	// API is the wire protocol of the endpoint; empty means the provider default.
+	API           string `json:"api,omitempty" yaml:"api,omitempty"`
+	DisableRemote bool   `json:"disableRemote,omitempty" yaml:"disableRemote,omitempty"`
 }
 
 // ConfigFromSpec creates a Config from a v1alpha1.ModelSpec.
@@ -90,6 +92,7 @@ func ConfigFromSpec(spec *v1alpha1.ModelSpec) Config {
 		Parameters: spec.GetParameters().AsMap(),
 		SecretKey:  secKey,
 		BaseURL:    strings.TrimRight(spec.GetBaseUrl(), "/"),
+		API:        strings.ToLower(strings.TrimSpace(spec.GetApi())),
 	}
 }
 
@@ -445,6 +448,7 @@ func (c *Client) Spec() *v1alpha1.ModelSpec {
 		Model:     c.cfg.Model,
 		SecretKey: c.cfg.SecretKey,
 		BaseUrl:   c.cfg.BaseURL,
+		Api:       c.cfg.API,
 	}
 	if len(c.cfg.Parameters) > 0 {
 		// Values that cannot be represented in a Struct (only JSON-like types can)
@@ -483,11 +487,6 @@ func (c *Client) Generate(ctx context.Context, req *GenerateRequest) (*GenerateR
 		MaxTokens:         req.MaxTokens,
 	}
 
-	provider := strings.ToLower(c.cfg.Provider)
-	if provider == "" {
-		provider = ProviderGoogle
-	}
-
 	// DisableRemote is the explicit, test-only opt-in for deterministic offline
 	// generation. It is the only path that can return text without a real call;
 	// every real failure surfaces as a typed error instead.
@@ -495,7 +494,22 @@ func (c *Client) Generate(ctx context.Context, req *GenerateRequest) (*GenerateR
 		return c.fallbackResponse(effectiveReq), nil
 	}
 
-	factory, ok := Lookup(provider)
+	// The wire protocol decides which adapter shapes the request, so a Model can
+	// pair one provider family with another protocol.
+	api, err := ResolveAPI(c.cfg.Provider, c.cfg.API)
+	if err != nil {
+		return nil, &ProviderError{Provider: c.cfg.Provider, Err: err}
+	}
+	adapter, ok := adapterForAPI(api)
+	if !ok {
+		return nil, &ProviderError{
+			Provider: c.cfg.Provider,
+			Err: fmt.Errorf("the control plane cannot speak api %q yet: the agent harness can, the workspace planner cannot; valid protocols here: %s",
+				api, strings.Join([]string{APIOpenAICompletions, APIAnthropicMessages, APIGoogleGenerateContent}, ", ")),
+		}
+	}
+
+	factory, ok := Lookup(adapter)
 	if !ok {
 		return nil, &ProviderError{
 			Provider: c.cfg.Provider,
