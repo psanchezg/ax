@@ -452,17 +452,31 @@ And a warning about kind: its default `--wait` **does not wait for the control p
 broken node is reported as a successful creation. Always check with `kubectl get nodes` that
 the node is `Ready` before continuing.
 
-#### ⚠️ If the install fails with `gcloud.auth.docker-helper`
+#### ⚠️ If the install fails pulling `gcr.io/distroless`: the `gcloud` credential helper
 
 No Google login is needed to install Substrate on kind — the script even does
 `unset GCE_REGION ... PROJECT_ID`. But if your `~/.docker/config.json` maps `gcr.io` to the
-`gcloud` credential helper and your token has expired, **ko cannot pull even a public image**
-(`gcr.io/distroless/...`) and the install aborts with:
+`gcloud` credential helper while gcloud has **no active account**, **ko cannot pull even a
+public image** (`gcr.io/distroless/...`): the install dies inside `ko resolve -f -`, before
+applying anything.
 
 ```text
-ERROR: (gcloud.auth.docker-helper) ... Reauthentication failed
-error getting credentials - err: exit status 1
+WARNING: Could not open the configuration file: [~/.config/gcloud/configurations/config_default]
+cache.get("gcr.io/distroless/static-debian13:latest@sha256:...") failed with error getting
+credentials - err: exit status 1, out: `You do not currently have an active account selected.`
+Error: error processing import paths in "-": error resolving image references: fetching base
+image: ... error getting credentials
 ```
+
+Diagnose it in one line — if this exits 1, the helper is the failure:
+
+```bash
+echo gcr.io | docker-credential-gcloud get      # → exit 1
+```
+
+`ko` (go-containerregistry) asks the keychain *before* the request, so a failing helper aborts
+the pull instead of falling back to anonymous. The distroless base images are public and need
+no credentials at all.
 
 Two ways out:
 
@@ -470,14 +484,21 @@ Two ways out:
 # A) Reauthenticate gcloud once (interactive, opens the browser)
 gcloud auth login
 
-# B) Leave your configuration alone: give this run a DOCKER_CONFIG without helpers
-mkdir -p /tmp/docker-nogcloud && echo '{}' > /tmp/docker-nogcloud/config.json
+# B) Leave your global configuration alone: a DOCKER_CONFIG for this shell that drops only the
+#    gcr.io credential helpers and keeps your Docker Hub / GHCR / ECR logins.
+mkdir -p /tmp/docker-nogcloud
+jq 'del(.credHelpers)' ~/.docker/config.json > /tmp/docker-nogcloud/config.json
 export DOCKER_CONFIG=/tmp/docker-nogcloud
 ```
 
-B is enough for this whole flow (every image is public and the local registry asks for no
-credentials), and it also applies to the `ko apply` of the AX control plane, whose base
-images come from `gcr.io/distroless`.
+Do not shortcut B with `echo '{}'`: that also throws away the `index.docker.io` login, and
+this flow pulls public images from Docker Hub too (the AX task-runner builds on
+`alpine/git`, and §3.2 builds `node:22-slim`), where anonymous pulls hit rate limits.
+
+Verified with `ko 0.19.1`: with B, ko builds against
+`gcr.io/distroless/static-debian13:latest` (anonymous, no helper) and pushes to
+`localhost:5001`, which asks for no credentials. Keep the variable exported for the rest of
+the flow (§3.2 and the `ko apply` of AX): it is the same keychain.
 
 Then AX. The cluster's local registry is what lets us deploy without publishing anything:
 
@@ -549,7 +570,7 @@ export DSH_IMAGE="localhost:5001/ax-dsh-runner:0.1.5-rc.3"   # the cluster's loc
 # the tag you give it: split $DSH_IMAGE into repo and tag, or the Makefile would publish
 # :latest and you would not find the tag you use in the manifest.
 unset DOCKER_DEFAULT_PLATFORM
-export DOCKER_CONFIG=/tmp/docker-nogcloud      # if the install needed this variable
+export DOCKER_CONFIG=/tmp/docker-nogcloud      # the §3.1 config; it keeps your Docker Hub login
 make push-task-runner-dsh \
   TASK_RUNNER_GOARCH="${PLATFORM#linux/}" \
   DSH_TASK_RUNNER_REPO="${DSH_IMAGE%:*}" \
