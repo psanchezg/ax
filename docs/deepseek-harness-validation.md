@@ -641,9 +641,46 @@ Expected: the `Task` goes through `Running` and DSH answers the goal. If you use
 > (state in `~/.ax/tunnels`, managed with `./bin/ax tunnel list|stop`). Check the server is
 > actually up with `kubectl get pods -n ax-system` before blaming the tunnel.
 
-- [X] `Task` reaches `Running`
-- [X] The `Task` completes and DSH prints its final message on the container's stdout
-      (`./bin/ax ssh dsh-goal -- ps aux | grep dsh` confirms it live)
+#### Where the goal is answered: the worker's log
+
+The actor is not a pod of its own: it is a guest inside a worker pod of the pool, and `ateom`
+copies its stdout/stderr into that pod's log, one JSON line per output line, tagged with
+`ate.actor.name`. That log is the only place where the harness output and the command's exit
+are visible (`ax describe task` only shows conditions):
+
+```bash
+# Which worker runs our actor (the pool has two; only one is ours)
+WORKER_IP=$(./bin/ax describe task dsh-goal | awk '$1=="Worker"{print $3}')
+kubectl -n ax-system get pod -l ate.dev/worker-pool=ax-pool -o wide | grep "$WORKER_IP"
+
+# This actor's output only. Drop -f and use --tail=-1 for a run that already ended; add
+# --prefix if you prefer the pod name on every line (the label selector covers the pool).
+kubectl -n ax-system logs -l ate.dev/worker-pool=ax-pool -c ateom -f \
+  | jq -Rr 'fromjson? | select(.labels["ate.actor.name"]=="dsh-goal") | .message'
+```
+
+The run ends well when that stream ends with the runner's own verdict (`runner/runner.go`):
+
+| Line in the worker's log | Meaning |
+|---|---|
+| `msg="started task command" pid=44 command="[dsh --profile headless …]"` | the command is running: the actor is alive, not merely scheduled |
+| `msg="wrote DSH provider binding" model=deepseek provider=openai path=/ax/dsh/settings.yaml` | the harness bound the `Model` (what §3.4.1 inspects afterwards) |
+| the model's answer, line by line | DSH's final message, on the container's stdout |
+| `msg="task command completed successfully" pid=44` | ✅ the command exited 0 |
+| `level=ERROR msg="task command exited with error" … exitCode=N` | ❌ the command failed with exit code `N` |
+
+A `WARN msg="workspace maiden run setup completed with errors; marker omitted to allow retry"`
+(a git fetch that had to retry) does not stop the run: the verdict is the `started` /
+`completed` pair. And the opposite trap: **the `Task` never leaves `Running` by itself**.
+`ax-task-runner` does not wire the `OnCommandExit` hook, so once the command exits it keeps
+serving metadata and the actor stays alive (`runner.Run` blocks until its context is
+cancelled): `ax get tasks` shows `Running` forever after a successful goal. The completion
+evidence is the log line, not the phase.
+
+- [X] `Task` reaches `Running`, and the worker's log shows
+      `msg="started task command" pid=…` for the `dsh` command
+- [X] The same stream ends with `msg="task command completed successfully" pid=…` carrying
+      DSH's final message (`./bin/ax ssh dsh-goal -- ps aux | grep dsh` confirms it live)
 
 ### 3.4 The six checks that matter
 
