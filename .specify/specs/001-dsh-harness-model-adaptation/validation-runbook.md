@@ -14,7 +14,7 @@ al sitio correcto. Marca los checkboxes conforme avances.
 | 0 — suite y runner real en local | ✅ verificado |
 | 0.5 — `dsh` real contra el `settings.yaml` generado | ✅ verificado (así apareció el fallo de `agent-default-model`) |
 | 1 — plano de control sin clúster | ✅ verificado |
-| 2 — sandbox real (Kubernetes + Substrate) | **parcial**: AX reconcilia la tarea, inyecta la credencial del `Model`, escribe `settings.yaml` y sirve `/metadata/v1alpha1/ax/model` dentro del sandbox. **Pendiente:** que DSH arranque dentro de la imagen — limitación de empaquetado del propio CLI, con el detalle y la salida en §3.2 |
+| 2 — sandbox real (Kubernetes + Substrate) | **parcial**: AX reconcilia la tarea, inyecta la credencial del `Model`, escribe `settings.yaml` y sirve `/metadata/v1alpha1/ax/model` dentro del sandbox. La imagen del runner ya **arranca DSH** (el árbol de plugins carga y la petición sale al endpoint, verificado dentro de la imagen publicada y en el sandbox), así que lo que queda es responder un goal con una credencial real |
 
 Tres cosas que aprendimos ejecutándolo y que corrigen supuestos previos:
 
@@ -69,7 +69,7 @@ Exporta tus valores una vez por shell (no los commitees):
 ```bash
 export REGISTRY=ghcr.io/<tu-org>            # registry que el clúster pueda tirar
 export ATESPACE=default
-export DSH_IMAGE="${REGISTRY}/ax-dsh-runner:test1"
+export DSH_IMAGE="${REGISTRY}/ax-dsh-runner:0.1.5-rc.3"
 export DEEPSEEK_API_KEY_SRC=...             # tu clave real, solo en el shell
 ```
 
@@ -513,12 +513,12 @@ encima de lo que pidas en la tarea.
 - [X] Substrate instalado y su Control API visible en `ate-system`
 - [X] Pods de `ax-system` en `Running`
 - [X] La plataforma de las imágenes coincide con la de los nodos
-- [ ] `WorkerPool` con 2 réplicas `READY`
+- [X] `WorkerPool` con 2 réplicas `READY`
 
 ### 3.2 Imagen del runner con DSH
 
 ```bash
-export DSH_IMAGE="localhost:5001/ax-dsh-runner:test1"   # el registry local del clúster
+export DSH_IMAGE="localhost:5001/ax-dsh-runner:0.1.5-rc.3"   # el registry local del clúster
 
 # El target compila el runner y la imagen para la MISMA arquitectura
 # (TASK_RUNNER_GOARCH, por defecto la del host, que es la de los nodos de kind aquí)
@@ -545,19 +545,19 @@ docker run --rm --entrypoint sh "$DSH_IMAGE" -c 'uname -m'     # → aarch64 en 
 Si vuelves a construir con la **misma** etiqueta, los nodos pueden quedarse con la copia
 cacheada: sube la etiqueta (`:test2`) al repetir.
 
-> **⚠️ Limitación conocida (encontrada en esta validación).** La instalación npm del CLI
-> dentro de una imagen Linux **no arranca**: el loader no resuelve
-> `@deepseek-ai/dsh-sandbox-local` con una instalación global, y con una instalación de
-> proyecto encuentra dos copias idénticas y muere con `Duplicate type name
-> 'DSH_STARTUPINFOW'`. Se probaron npm 10 y 12, `--legacy-peer-deps`, `npm dedupe`,
-> borrar la copia anidada, una imagen con pnpm y la instalación desde el tarball; no hay
-> imagen oficial de DSH que reutilizar. Para el nivel 2, **usa una imagen construida con
-> las herramientas de DeepSeek** (o la que ya te funcione) y apunta `harness.image` a su
-> digest: todo lo demás —el `settings.yaml` que escribe el harness, el contrato de
-> entorno y las rutas de metadata— es independiente de cómo llegó DSH a la imagen. El
-> detalle completo está en `docs/deepseek-harness.md`.
+> **Cómo se arregló el arranque de DSH (esta validación).** El CLI tiene que instalarse
+> **global** (`npm install -g --prefix /opt/dsh`): así npm aplana todo el bundle dentro del
+> `node_modules` del propio CLI y no duplica nada. Una instalación de proyecto anida una
+> segunda copia completa del cierre bajo `dsh-base` y el loader muere con `Duplicate type
+> name 'DSH_STARTUPINFOW'`. npm además se deja fuera un plugin,
+> `@deepseek-ai/dsh-sandbox-local`, por un conflicto de peers (`plugin(s) failed to load:
+> @deepseek-ai/dsh-sandbox-local`), así que se nombra explícitamente en el install. Quedan
+> ~16 paquetes transitivos duplicados (los reporta el build) y **no** impiden el arranque.
+> Como el fallo sólo aparece al arrancar dentro de una tarea, el `Dockerfile` arranca el
+> CLI una vez contra un puerto cerrado y exige que pase del árbol de plugins. Detalle en
+> `docs/deepseek-harness.md`.
 
-- [ ] Imagen publicada en el registry del clúster, con la arquitectura correcta
+- [X] Imagen publicada en el registry del clúster, con la arquitectura correcta
 
 ### 3.3 Recursos de prueba
 
@@ -584,7 +584,7 @@ sed -i '' "s|ghcr.io/<org>/ax-dsh-runner@sha256:<digest>|${DSH_IMAGE%:*}@$DIGEST
 Esperado: el `Task` pasa por `Running` y el goal lo responde DSH. Si usas un `Gateway`
 endurecido, añade `api.deepseek.com:443` a su allowlist (por defecto `*:443`).
 
-- [ ] `Task` alcanza `Running`
+- [X] `Task` alcanza `Running`
 - [ ] El `Task` llega a completarse y DSH imprime su mensaje final en stdout del contenedor
       (`./bin/ax ssh dsh-goal -- ps aux | grep dsh` lo confirma en vivo)
 
@@ -628,7 +628,7 @@ primer contacto y para descartar problemas de red/credenciales antes del nivel 2
 
 | Criterio | Cómo se comprueba | Resultado | Notas |
 |---|---|---|---|
-| SC-001 goal DSH end-to-end | §3.3 | | |
+| SC-001 goal DSH end-to-end | §3.3 | parcial | DSH **arranca en el sandbox** (imagen `0.1.5-rc.3`, `dsh --version` dentro del actor) y la petición sale al endpoint del `Model`: `./bin/ax ssh dsh-goal -- sh -c 'dsh --profile headless "reply with ok"'` devuelve `AUTH: 401 ... api key: ****-key is invalid`. Falta una clave real en `deepseek-api-secret` para ver la respuesta final; antes de este arreglo el mismo comando moría en `Duplicate type name 'DSH_STARTUPINFOW'` |
 | SC-002 fallos ruidosos, cero fabricación | §1.1 | | |
 | SC-003 provider inválido rechazado en apply | §2 (1) | | |
 | SC-004 rotación sin cambios | §3.4 (6) | | |
