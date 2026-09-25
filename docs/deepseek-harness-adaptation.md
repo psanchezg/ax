@@ -146,7 +146,7 @@ configurations." This proposal is the concrete design for that item, plus the
 
 ## 3. DeepSeek Harness: the integration surface
 
-DSH (`@deepseek-ai/dsh`, observed version `0.1.5-rc.2`) is a good fit for the
+DSH (`@deepseek-ai/dsh`, observed versions `0.1.5-rc.2` and `0.1.5-rc.3`) is a good fit for the
 runner contract because it ships a **one-shot headless mode**:
 
 ```bash

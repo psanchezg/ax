@@ -77,28 +77,24 @@ the installed package on first use, so first boot needs no registry egress and
 there is no profile directory in this repository to keep in sync with the CLI
 version.
 
-> **Known limitation: the npm install of the CLI does not boot inside a Linux
-> image.** Two failure modes were observed against `@deepseek-ai/dsh` 0.1.5-rc.2,
-> and both appear at boot as
-> `plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local` or
-> `Duplicate type name 'DSH_STARTUPINFOW'`:
-> a global `npm install -g` leaves `dsh-sandbox-local` outside the installation
-> closure the loader resolves from, and a project install (with or without a
-> version override, `npm dedupe`, or the nested copy removed) leaves two identical
-> copies that the loader imports twice. npm 10 and 12, `--legacy-peer-deps`, a
-> pnpm-enabled image, and installing the package as the root project from its
-> tarball were all tried; a working install (for example the Homebrew package on
-> macOS) has a flat `dsh/node_modules` with no duplicates, which npm's resolver does
-> not reproduce here and no official DSH image is published to borrow. The
-> `Dockerfile` keeps the closest recipe plus assertions that fail the build if the
-> plugin count or bundle version drift, but **treat the DSH install as an open
-> item**: build the harness image with DeepSeek's own tooling (or bring a working
-> image) and point `spec.harness.image` at it — everything else in this document,
-> including the generated `settings.yaml`, is independent of how DSH got there.
+The install is a **global** one (`npm install --global --prefix /opt/dsh`), and
+that is what makes the tree bootable:
+
+> A project-style install does not produce a runnable tree. npm hoists the CLI's
+> plugins to the project root and nests a second, identical copy of every one of
+> them under `dsh-base`, so the plugin loader imports each plugin twice and dies
+> at boot with `Duplicate type name 'DSH_STARTUPINFOW'`; a global install instead
+> hoists the bundle flat into the CLI's own `node_modules` — the layout of a
+> working install, such as the Homebrew package on macOS — and duplicates nothing.
+> npm then drops exactly one plugin, `@deepseek-ai/dsh-sandbox-local`, on a peer
+> conflict (`plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local`), so the
+> Dockerfile names it explicitly. Both failures appear only at boot inside a task,
+> so the build asserts instead: no `@deepseek-ai` package may appear twice under
+> the prefix, and every `@deepseek-ai/dsh-*` package must sit at `DSH_VERSION`.
 >
 > Do not simply bump `DSH_VERSION`: `0.1.7-rc.2` boots, but it **ignores** the
 > `llm-pi-ai` provider section, so the request goes to DSH's built-in route instead
-> of the `Model` AX resolved.
+> of the `Model` AX resolved. `0.1.5-rc.3` honors it (see the protocol note below).
 
 ## What the harness configures
 
@@ -146,6 +142,18 @@ with a Responses-only endpoint, or with a gateway that speaks Messages in front 
 another vendor, by declaring `spec.api` (see
 [Manifests](manifests.md#wire-protocol-api)). Gemini has no native pi-ai route, so
 it goes through its OpenAI-compatible surface.
+
+`spec.baseURL` is passed to DSH unchanged, and each protocol appends its own path
+to it, which fixes what the value has to be:
+
+| `api` | Request path DSH builds | So `spec.baseURL` is |
+|---|---|---|
+| `openai-completions` | `<baseURL>/chat/completions` | the versioned root, e.g. `https://api.deepseek.com/v1` |
+| `openai-responses` | `<baseURL>/responses` | the versioned root, e.g. `https://api.openai.com/v1` |
+| `anthropic-messages` | `<baseURL>/v1/messages?beta=true` | the host root, e.g. `https://api.anthropic.com` |
+
+The last row is the Anthropic SDK's convention, not a quirk of the harness: a
+`baseURL` that already ends in `/v1` produces `/v1/v1/messages`.
 
 Nothing else is generated. MCP servers, skills, `AGENTS.md`, `agent-presets/`,
 and profile patches are **not** materialized yet: that is the manifest-driven

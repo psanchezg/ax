@@ -43,7 +43,7 @@ spec:
     # Agent Substrate rejects an actor template whose image is only tagged
     # ("must be pinned by digest"), because an image change invalidates the
     # snapshots taken from it.
-    image: "ghcr.io/<org>/ax-dsh-runner@sha256:<digest>"
+    image: "localhost:5001/ax-dsh-runner@sha256:d1c8d57d94eba2a0d3f76912a3ab131f77e92eb7f63986e811a1290304de2a81"
     modelRef: deepseek
     env:
       - name: DSH_LOG_LEVEL
