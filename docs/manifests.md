@@ -193,11 +193,11 @@ Runnable copies live in `examples/model-deepseek.yaml` and
 
 ### Providers and parameters
 
-| `provider` | Wire API | Endpoint |
+| `provider` | Default `api` | Endpoint |
 |---|---|---|
-| `google` (default when unset) | Gemini `generateContent` | Google Generative Language API, or `baseURL` |
-| `openai` | OpenAI-compatible `chat/completions` | `baseURL` (`https://api.openai.com/v1` when unset) |
-| `anthropic` | Anthropic Messages API | `baseURL` (`https://api.anthropic.com` when unset; the adapter appends `/v1/messages`) |
+| `google` (default when unset) | `google-generate-content` | Google Generative Language API, or `baseURL` |
+| `openai` | `openai-completions` | `baseURL` (`https://api.openai.com/v1` when unset) |
+| `anthropic` | `anthropic-messages` | `baseURL` (`https://api.anthropic.com` when unset; the adapter appends `/v1/messages`) |
 
 An unknown `provider` is rejected at `ax apply` time with the list of valid
 values. The `parameters` map is passed through to the provider: Gemini-style
@@ -208,4 +208,52 @@ and any other key flows through verbatim, so provider-native names also work.
 Provider failures are loud: a missing or wrong key, an HTTP error, or an
 unreachable endpoint surfaces as an error carrying the provider's status and
 response body. The platform never substitutes a fabricated completion.
+
+### Wire protocol (`api`)
+
+`provider` says where the credential and the family conventions come from; `api`
+says which protocol the endpoint actually speaks. They are independent, which is
+what makes these cases expressible:
+
+```yaml
+apiVersion: ax.io/v1alpha1
+kind: Model
+metadata:
+  name: responses-only
+  atespace: default
+spec:
+  provider: openai
+  api: openai-responses # an OpenAI-compatible service that only implements /responses
+  model: mimo-v2.5-tts
+  baseURL: https://api.example.com/v1
+  secretKey:
+    name: example-secret
+    key: EXAMPLE_API_KEY
+---
+apiVersion: ax.io/v1alpha1
+kind: Model
+metadata:
+  name: vendor-over-anthropic-gateway
+  atespace: default
+spec:
+  provider: openai
+  api: anthropic-messages # a gateway that speaks Messages in front of another vendor
+  model: some-model
+  baseURL: https://gateway.example.com
+  secretKey:
+    name: gateway-secret
+    key: GATEWAY_API_KEY
+```
+
+Valid protocols are `openai-completions`, `openai-responses`,
+`anthropic-messages`, and `google-generate-content`; an unknown value is rejected
+at `ax apply` time. Leaving `api` unset keeps the provider default above, so
+existing manifests are unaffected. The field is honored by the agent harness,
+which speaks all four; AX's own workspace planner speaks the chat protocols and
+returns a typed error when asked for `openai-responses`, instead of sending the
+request to the wrong endpoint.
+
+A caveat worth stating: `api` selects how requests are shaped, not what the model
+can do. A speech or embedding model cannot drive an agent loop whatever the
+protocol, because the loop expects chat completions.
 
