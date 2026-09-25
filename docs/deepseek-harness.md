@@ -130,11 +130,18 @@ is why AX injects the secret value under that name rather than a fixed
 `GEMINI_API_KEY`. Rotating the key is a Kubernetes secret update; the next task
 provisioning picks it up.
 
-| `Model.spec.provider` | `api` written for DSH | Endpoint |
+| `Model.spec.api` (or the provider default) | `api` written for DSH | Endpoint |
 |---|---|---|
-| `openai` | `openai-completions` | `spec.baseURL`, or `https://api.openai.com/v1` |
-| `anthropic` | `anthropic-messages` | `spec.baseURL`, or `https://api.anthropic.com` |
-| `google` (or unset) | `openai-completions` | Gemini's OpenAI-compatible surface, or `spec.baseURL` |
+| `openai-completions` (default for `openai`) | `openai-completions` | `spec.baseURL`, or `https://api.openai.com/v1` |
+| `openai-responses` | `openai-responses` | `spec.baseURL` |
+| `anthropic-messages` (default for `anthropic`) | `anthropic-messages` | `spec.baseURL`, or `https://api.anthropic.com` |
+| `google-generate-content` (default for `google`) | `openai-completions` | Gemini's OpenAI-compatible surface, or `spec.baseURL` |
+
+The protocol comes from the `Model`, not from the harness: a workspace can drive DSH
+with a Responses-only endpoint, or with a gateway that speaks Messages in front of
+another vendor, by declaring `spec.api` (see
+[Manifests](manifests.md#wire-protocol-api)). Gemini has no native pi-ai route, so
+it goes through its OpenAI-compatible surface.
 
 `spec.baseURL` is passed to DSH unchanged, and each protocol appends its own path
 to it, which fixes what the value has to be:
