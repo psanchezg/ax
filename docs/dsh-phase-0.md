@@ -33,7 +33,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       git curl ca-certificates openssh-client procps bash \
     && rm -rf /var/lib/apt/lists/*
 # Pin the CLI version; profiles are installed at first boot in this recipe.
-RUN npm install -g @deepseek-ai/dsh@0.1.5-rc.2
+# Both names are needed: npm drops @deepseek-ai/dsh-sandbox-local on a peer
+# conflict and dsh does not boot without it. Keep the two versions in step.
+RUN npm install -g @deepseek-ai/dsh@0.1.5-rc.3 @deepseek-ai/dsh-sandbox-local@0.1.5-rc.3
 ENV DSH_HOME=/ax/dsh
 COPY bin/linux_amd64/ax-task-runner /usr/local/bin/ax-task-runner
 ENTRYPOINT ["/usr/local/bin/ax-task-runner"]
