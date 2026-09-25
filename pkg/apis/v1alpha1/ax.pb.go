@@ -1351,7 +1351,14 @@ type ModelSpec struct {
 	// path prefix such as /v1) used instead of the provider default, so
 	// self-hosted and gateway endpoints are declarable. json_name keeps the
 	// `baseURL` spelling in YAML and JSON.
-	BaseUrl       string `protobuf:"bytes,8,opt,name=base_url,json=baseURL,proto3" json:"base_url,omitempty"`
+	BaseUrl string `protobuf:"bytes,8,opt,name=base_url,json=baseURL,proto3" json:"base_url,omitempty"`
+	// api is the wire protocol the endpoint speaks. It is what lets a Model reach
+	// an endpoint whose protocol differs from its provider family: an
+	// OpenAI-compatible service that only implements the Responses API, or an
+	// Anthropic-compatible gateway in front of another vendor. Unset means the
+	// provider default: google-generate-content for google, openai-completions
+	// for openai, anthropic-messages for anthropic.
+	Api           string `protobuf:"bytes,9,opt,name=api,proto3" json:"api,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1417,6 +1424,13 @@ func (x *ModelSpec) GetParameters() *structpb.Struct {
 func (x *ModelSpec) GetBaseUrl() string {
 	if x != nil {
 		return x.BaseUrl
+	}
+	return ""
+}
+
+func (x *ModelSpec) GetApi() string {
+	if x != nil {
+		return x.Api
 	}
 	return ""
 }
@@ -2628,7 +2642,7 @@ const file_pkg_apis_v1alpha1_ax_proto_rawDesc = "" +
 	"apiVersion\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x123\n" +
 	"\bmetadata\x18\x03 \x01(\v2\x17.ax.v1alpha1.ObjectMetaR\bmetadata\x12*\n" +
-	"\x04spec\x18\x04 \x01(\v2\x16.ax.v1alpha1.ModelSpecR\x04spec\"\x8a\x02\n" +
+	"\x04spec\x18\x04 \x01(\v2\x16.ax.v1alpha1.ModelSpecR\x04spec\"\x9c\x02\n" +
 	"\tModelSpec\x12\x1a\n" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x128\n" +
@@ -2637,7 +2651,8 @@ const file_pkg_apis_v1alpha1_ax_proto_rawDesc = "" +
 	"\n" +
 	"parameters\x18\a \x01(\v2\x17.google.protobuf.StructR\n" +
 	"parameters\x12\x19\n" +
-	"\bbase_url\x18\b \x01(\tR\abaseURLJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06R\vtemperatureR\n" +
+	"\bbase_url\x18\b \x01(\tR\abaseURL\x12\x10\n" +
+	"\x03api\x18\t \x01(\tR\x03apiJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06R\vtemperatureR\n" +
 	"max_tokensR\x12system_instruction\"4\n" +
 	"\fSecretKeyRef\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +

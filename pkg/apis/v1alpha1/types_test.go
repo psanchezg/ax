@@ -511,3 +511,33 @@ func TestModel_BaseURL_RoundTrip(t *testing.T) {
 		t.Errorf("model round trip changed:\n%s", out)
 	}
 }
+
+func TestModel_API_RoundTrip(t *testing.T) {
+	// api is the wire protocol of the endpoint, independent of the provider
+	// family, so a Model can point an OpenAI-compatible route at an endpoint
+	// that only speaks the Responses API.
+	const wantAPI = "openai-responses"
+	doc := "kind: Model\nspec:\n  provider: openai\n  model: mimo-v2.5-tts\n  api: " + wantAPI + "\n"
+	var m v1alpha1.Model
+	if err := yaml.Unmarshal([]byte(doc), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m.Spec.GetApi() != wantAPI {
+		t.Fatalf("api = %q, want %q", m.Spec.GetApi(), wantAPI)
+	}
+
+	out, err := yaml.Marshal(&m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "api: "+wantAPI) {
+		t.Errorf("expected the api spelling in output:\n%s", out)
+	}
+	var again v1alpha1.Model
+	if err := yaml.Unmarshal(out, &again); err != nil {
+		t.Fatal(err)
+	}
+	if !proto.Equal(&m, &again) {
+		t.Errorf("model round trip changed:\n%s", out)
+	}
+}

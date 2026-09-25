@@ -219,6 +219,13 @@ message ModelSpec {
   // self-hosted and gateway endpoints are declarable. json_name keeps the
   // `baseURL` spelling in YAML and JSON.
   string base_url = 8 [json_name = "baseURL"];
+  // api is the wire protocol the endpoint speaks. It is what lets a Model reach
+  // an endpoint whose protocol differs from its provider family: an
+  // OpenAI-compatible service that only implements the Responses API, or an
+  // Anthropic-compatible gateway in front of another vendor. Unset means the
+  // provider default: google-generate-content for google, openai-completions
+  // for openai, anthropic-messages for anthropic.
+  string api = 9;
 }
 
 message SecretKeyRef {
